@@ -115,17 +115,16 @@ export default function SpacePage() {
                 } else if (data.action === "update" && data.taskId) {
                     setTasks(tasks.map(t => {
                         if (t.id === data.taskId) {
-                            // Handle description updates (append if provided)
-                            const newDescription = data.updates?.description
-                                ? (t.description ? `${t.description}\n\n${data.updates.description}` : data.updates.description)
-                                : t.description;
+                            // Handle description updates (overwrite if provided, don't append)
+                            const newDescription = data.updates?.description || t.description;
 
                             // Add timeline entry if provided
                             const newUpdates = data.timeline
-                                ? [...(t.updates || []), { ...data.timeline, id: Date.now().toString() }]
+                                ? [...(t.updates || []), { ...data.timeline, id: Date.now().toString(), timestamp: Date.now() }]
                                 : t.updates;
 
                             // Build update object - only include fields that are explicitly in data.updates
+                            // eslint-disable-next-line @typescript-eslint/no-explicit-any
                             const updatedTask: any = {
                                 ...t,
                                 description: newDescription,
@@ -156,6 +155,21 @@ export default function SpacePage() {
                         }
                         return t;
                     }));
+
+                    // Trigger description generation for the updated task
+                    const updatedTask = tasks.find(t => t.id === data.taskId);
+                    if (updatedTask) {
+                        // We need to construct the task object as it WILL be after state update
+                        // This is a bit tricky with React state, so we'll pass the constructed object
+                        // Re-using the logic from above (simplified for the call)
+                        const taskForGen = {
+                            ...updatedTask,
+                            description: data.updates?.description || updatedTask.description,
+                            updates: data.timeline ? [...(updatedTask.updates || []), { ...data.timeline, id: Date.now().toString(), timestamp: Date.now() }] : updatedTask.updates,
+                            // ... apply other updates if needed for context
+                        };
+                        generateDescription(taskForGen);
+                    }
                 }
                 setContext("");
             }
@@ -167,12 +181,31 @@ export default function SpacePage() {
         }
     };
 
+    const generateDescription = async (task: Task) => {
+        try {
+            const res = await fetch("/api/generate-description", {
+                method: "POST",
+                body: JSON.stringify({ task }),
+            });
+            const data = await res.json();
+            if (data.description) {
+                setTasks(prev => prev.map(t =>
+                    t.id === task.id ? { ...t, description: data.description } : t
+                ));
+            }
+        } catch (error) {
+            console.error("Failed to generate description:", error);
+        }
+    };
+
     const handleUpdateTask = (taskId: string, updates: Partial<Task>) => {
-        setTasks(tasks.map(t => {
+        let updatedTask: Task | undefined;
+
+        setTasks(prev => prev.map(t => {
             if (t.id === taskId) {
                 // CRITICAL: Only update fields that are explicitly provided
                 // Preserve all existing fields that aren't being changed
-                return {
+                const newTask = {
                     ...t,
                     ...(updates.status !== undefined && { status: updates.status }),
                     ...(updates.priority !== undefined && { priority: updates.priority }),
@@ -182,9 +215,17 @@ export default function SpacePage() {
                     ...(updates.description !== undefined && { description: updates.description }),
                     updatedAt: Date.now()
                 };
+                updatedTask = newTask;
+                return newTask;
             }
             return t;
         }));
+
+        // Trigger description update in background if significant changes
+        if (updatedTask && (updates.status || updates.updates)) { // updates.updates check is for when timeline changes
+            // Small delay to let state settle/debounce could be added here if needed
+            generateDescription(updatedTask);
+        }
     };
 
     const handleDeleteTask = (taskId: string) => {
@@ -268,6 +309,7 @@ export default function SpacePage() {
                 onClose={() => setSelectedTask(null)}
                 onUpdate={handleUpdateTask}
                 onDelete={handleDeleteTask}
+                onPolish={generateDescription}
             />
         </div>
     );

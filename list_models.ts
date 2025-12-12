@@ -14,6 +14,7 @@ async function listModels() {
         const response = await fetch(url);
         const data = await response.json();
         if (data.models) {
+            // eslint-disable-next-line @typescript-eslint/no-explicit-any
             console.log("Available Models:", data.models.map((m: any) => m.name));
         } else {
             console.log("No models found or error structure:", data);

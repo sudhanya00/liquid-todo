@@ -1,7 +1,10 @@
 import { Task } from "@/types";
 import { motion, AnimatePresence } from "framer-motion";
-import { X, Check, Trash2, Calendar, Flag, AlignLeft } from "lucide-react";
+import { X, Check, Trash2, Calendar, Flag, AlignLeft, CheckCircle, FileText, Zap, Activity, Sparkles } from "lucide-react";
 import { useState, useEffect } from "react";
+import { getRelativeTime } from "@/lib/timeUtils";
+
+import ReactMarkdown from "react-markdown";
 
 interface TaskDetailModalProps {
     task: Task | null;
@@ -9,11 +12,14 @@ interface TaskDetailModalProps {
     onClose: () => void;
     onUpdate: (taskId: string, updates: Partial<Task>) => void;
     onDelete: (taskId: string) => void;
+    onPolish?: (task: Task) => Promise<void>;
 }
 
-export default function TaskDetailModal({ task, isOpen, onClose, onUpdate, onDelete }: TaskDetailModalProps) {
+export default function TaskDetailModal({ task, isOpen, onClose, onUpdate, onDelete, onPolish }: TaskDetailModalProps) {
     const [title, setTitle] = useState("");
     const [description, setDescription] = useState("");
+    const [isEditingDescription, setIsEditingDescription] = useState(false);
+    const [isPolishing, setIsPolishing] = useState(false);
     const [dueDate, setDueDate] = useState("");
     const [dueTime, setDueTime] = useState("");
     const [priority, setPriority] = useState<"low" | "medium" | "high">("medium");
@@ -29,6 +35,17 @@ export default function TaskDetailModal({ task, isOpen, onClose, onUpdate, onDel
             setStatus(task.status as "todo" | "done");
         }
     }, [task]);
+
+    const handlePolish = async () => {
+        if (task && onPolish) {
+            setIsPolishing(true);
+            try {
+                await onPolish(task);
+            } finally {
+                setIsPolishing(false);
+            }
+        }
+    };
 
     const handleSave = () => {
         if (task) {
@@ -112,17 +129,66 @@ export default function TaskDetailModal({ task, isOpen, onClose, onUpdate, onDel
                                 {/* Main Layout */}
                                 <div className="grid grid-cols-1 md:grid-cols-3 gap-8">
                                     {/* Left Column: Description */}
-                                    <div className="md:col-span-2 space-y-4">
-                                        <div className="flex items-center gap-2 text-white/50 mb-2">
-                                            <AlignLeft className="h-4 w-4" />
-                                            <span className="text-sm font-medium">Description</span>
+                                    <div className="md:col-span-2 space-y-4 flex flex-col">
+                                        <div className="flex items-center justify-between text-white/50 mb-2">
+                                            <div className="flex items-center gap-2">
+                                                <AlignLeft className="h-4 w-4" />
+                                                <span className="text-sm font-medium">Description</span>
+                                            </div>
+                                            <div className="flex items-center gap-2">
+                                                {onPolish && (
+                                                    <button
+                                                        onClick={handlePolish}
+                                                        disabled={isPolishing}
+                                                        className="flex items-center gap-1.5 px-2 py-1 rounded-md text-xs font-medium bg-purple-500/10 text-purple-400 hover:bg-purple-500/20 transition-colors disabled:opacity-50"
+                                                    >
+                                                        <Sparkles className={`h-3 w-3 ${isPolishing ? 'animate-spin' : ''}`} />
+                                                        {isPolishing ? 'Polishing...' : 'Polish'}
+                                                    </button>
+                                                )}
+                                                <button
+                                                    onClick={() => setIsEditingDescription(!isEditingDescription)}
+                                                    className="text-xs hover:text-white transition-colors uppercase tracking-wider font-medium"
+                                                >
+                                                    {isEditingDescription ? "Preview" : "Edit"}
+                                                </button>
+                                            </div>
                                         </div>
-                                        <textarea
-                                            value={description}
-                                            onChange={(e) => setDescription(e.target.value)}
-                                            className="w-full h-40 rounded-xl bg-white/5 p-4 text-white/90 placeholder-white/20 outline-none focus:ring-2 focus:ring-[var(--accent-blue)] resize-none text-sm leading-relaxed"
-                                            placeholder="Add a more detailed description..."
-                                        />
+
+                                        {isEditingDescription ? (
+                                            <textarea
+                                                value={description}
+                                                onChange={(e) => setDescription(e.target.value)}
+                                                className="w-full min-h-[400px] rounded-xl bg-white/5 p-6 text-white/90 placeholder-white/20 outline-none focus:ring-2 focus:ring-[var(--accent-blue)] resize-none text-sm leading-relaxed font-mono"
+                                                placeholder="Add a more detailed description..."
+                                            />
+                                        ) : (
+                                            <div
+                                                className="w-full min-h-[400px] rounded-xl bg-white/5 p-6 text-white/90 text-sm leading-relaxed overflow-y-auto cursor-pointer hover:bg-white/10 transition-colors border border-transparent hover:border-white/10 whitespace-normal break-words"
+                                                onClick={() => setIsEditingDescription(true)}
+                                            >
+                                                {description ? (
+                                                    <ReactMarkdown
+                                                        components={{
+                                                            h1: ({ ...props }: any) => <h1 className="text-xl font-bold text-white mb-4 mt-2" {...props} />,
+                                                            h2: ({ ...props }: any) => <h2 className="text-lg font-bold text-white/90 mb-3 mt-6 border-b border-white/10 pb-2" {...props} />,
+                                                            h3: ({ ...props }: any) => <h3 className="text-base font-bold text-white/90 mb-2 mt-4" {...props} />,
+                                                            p: ({ ...props }: any) => <p className="mb-4 text-white/80 leading-7" {...props} />,
+                                                            ul: ({ ...props }: any) => <ul className="list-disc pl-5 mb-4 space-y-2 text-white/80" {...props} />,
+                                                            ol: ({ ...props }: any) => <ol className="list-decimal pl-5 mb-4 space-y-2 text-white/80" {...props} />,
+                                                            li: ({ ...props }: any) => <li className="pl-1" {...props} />,
+                                                            strong: ({ ...props }: any) => <strong className="font-semibold text-white" {...props} />,
+                                                            blockquote: ({ ...props }: any) => <blockquote className="border-l-4 border-white/20 pl-4 italic text-white/60 my-4" {...props} />,
+                                                            code: ({ ...props }: any) => <code className="bg-black/30 rounded px-1.5 py-0.5 font-mono text-xs text-blue-300 whitespace-pre-wrap break-all" {...props} />,
+                                                        }}
+                                                    >
+                                                        {description.trim()}
+                                                    </ReactMarkdown>
+                                                ) : (
+                                                    <span className="text-white/20 italic">No description provided. Click to add one...</span>
+                                                )}
+                                            </div>
+                                        )}
                                     </div>
 
                                     {/* Right Column: Meta Fields */}
@@ -187,6 +253,102 @@ export default function TaskDetailModal({ task, isOpen, onClose, onUpdate, onDel
                                         </div>
                                     </div>
                                 </div>
+
+                                {/* Activity Timeline */}
+                                {task.updates && task.updates.length > 0 && (
+                                    <div className="space-y-4">
+                                        <div className="flex items-center gap-2 text-white/50">
+                                            <Activity className="h-4 w-4" />
+                                            <span className="text-sm font-medium">Activity</span>
+                                        </div>
+
+                                        <div className="space-y-3">
+                                            {[
+                                                // Existing updates
+                                                ...[...task.updates].reverse().map((update) => ({
+                                                    ...update,
+                                                    isCreation: false
+                                                })),
+                                                // Creation event (always last in the reversed list)
+                                                {
+                                                    id: 'creation',
+                                                    type: 'creation',
+                                                    content: 'Task created',
+                                                    timestamp: task.createdAt,
+                                                    isCreation: true
+                                                }
+                                            ].map((update, index, array) => {
+                                                // Determine icon and color based on update type
+                                                const getUpdateStyle = () => {
+                                                    if (update.isCreation) {
+                                                        return {
+                                                            icon: <Flag className="h-4 w-4" />,
+                                                            color: "text-purple-400 bg-purple-400/10 border-purple-400/20"
+                                                        };
+                                                    }
+
+                                                    switch (update.type) {
+                                                        case "status_change":
+                                                            return {
+                                                                icon: <CheckCircle className="h-4 w-4" />,
+                                                                color: "text-green-400 bg-green-400/10 border-green-400/20"
+                                                            };
+                                                        case "note":
+                                                            return {
+                                                                icon: <FileText className="h-4 w-4" />,
+                                                                color: "text-blue-400 bg-blue-400/10 border-blue-400/20"
+                                                            };
+                                                        case "field_update":
+                                                            return {
+                                                                icon: <Zap className="h-4 w-4" />,
+                                                                color: "text-orange-400 bg-orange-400/10 border-orange-400/20"
+                                                            };
+                                                        default:
+                                                            return {
+                                                                icon: <FileText className="h-4 w-4" />,
+                                                                color: "text-white/40 bg-white/5 border-white/10"
+                                                            };
+                                                    }
+                                                };
+
+                                                const style = getUpdateStyle();
+
+                                                return (
+                                                    <div key={update.id} className="flex gap-3 group">
+                                                        {/* Timeline connector */}
+                                                        <div className="flex flex-col items-center">
+                                                            <div className={`p-2 rounded-full border ${style.color} transition-all group-hover:scale-110`}>
+                                                                {style.icon}
+                                                            </div>
+                                                            {index < array.length - 1 && (
+                                                                <div className="flex-1 w-px bg-white/10 my-1" />
+                                                            )}
+                                                        </div>
+
+                                                        {/* Update content */}
+                                                        <div className="flex-1 pb-4">
+                                                            <div className="rounded-lg bg-white/5 p-3 hover:bg-white/10 transition-colors border border-white/5">
+                                                                <p className="text-sm text-white/90 leading-relaxed">
+                                                                    {update.content}
+                                                                </p>
+                                                                {/* @ts-expect-error */}
+                                                                {update.field && update.oldValue && update.newValue && (
+                                                                    <p className="text-xs text-white/40 mt-1">
+                                                                        {/* @ts-expect-error */}
+                                                                        {update.field}: <span className="line-through">{update.oldValue}</span> → {update.newValue}
+                                                                    </p>
+                                                                )}
+                                                                <p className="text-xs text-white/30 mt-2">
+                                                                    {getRelativeTime(update.timestamp)}
+                                                                </p>
+                                                            </div>
+                                                        </div>
+                                                    </div>
+                                                );
+                                            })}
+                                        </div>
+                                    </div>
+                                )}
                             </div>
 
                             {/* Footer */}

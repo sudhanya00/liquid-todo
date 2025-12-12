@@ -1,3 +1,4 @@
+/* eslint-disable @next/next/no-img-element */
 "use client";
 
 import { useRouter } from "next/navigation";
@@ -8,7 +9,7 @@ import { motion } from "framer-motion";
 import EditSpaceModal from "@/components/EditSpaceModal";
 import { useAuth } from "@/context/AuthContext";
 import { Loader2 } from "lucide-react";
-import { collection, query, where, onSnapshot, addDoc, deleteDoc, doc, updateDoc, orderBy } from "firebase/firestore";
+import { collection, query, where, onSnapshot, addDoc, deleteDoc, doc, updateDoc } from "firebase/firestore";
 import { db } from "@/lib/firebase";
 
 export default function Home() {
@@ -30,8 +31,8 @@ export default function Home() {
 
         const q = query(
             collection(db, "spaces"),
-            where("ownerId", "==", user.uid),
-            orderBy("createdAt", "desc")
+            where("ownerId", "==", user.uid)
+            // orderBy("createdAt", "desc") // Temporarily removed to avoid missing index error
         );
 
         const unsubscribe = onSnapshot(q, (snapshot) => {
@@ -39,7 +40,12 @@ export default function Home() {
                 id: doc.id,
                 ...doc.data()
             })) as Space[];
+            // Client-side sort since we removed the server-side sort
+            spacesData.sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0));
             setSpaces(spacesData);
+            setIsLoadingSpaces(false);
+        }, (error) => {
+            console.error("Error fetching spaces:", error);
             setIsLoadingSpaces(false);
         });
 

@@ -1,6 +1,6 @@
-import { GoogleGenerativeAI } from "@google/generative-ai";
+import { GoogleGenerativeAI, GenerativeModel } from "@google/generative-ai";
 
-let model: any;
+let model: GenerativeModel;
 
 export function getGeminiModel() {
     if (model) return model;
