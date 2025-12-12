@@ -27,12 +27,15 @@ const db = getFirestore(app);
 const googleProvider = new GoogleAuthProvider();
 
 // Enable offline persistence (only on client)
-if (isClient && !getApps().length) {
+// Enable offline persistence (only on client)
+if (isClient) {
     enableIndexedDbPersistence(db).catch((err) => {
         if (err.code === 'failed-precondition') {
             console.warn('Firestore persistence failed: Multiple tabs open');
         } else if (err.code === 'unimplemented') {
             console.warn('Firestore persistence not available in this browser');
+        } else if (err.code === 'already-exists') {
+            // Already enabled, ignore
         }
     });
 }

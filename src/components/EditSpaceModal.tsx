@@ -18,9 +18,10 @@ export default function EditSpaceModal({ space, isOpen, onClose, onSave }: EditS
 
     useEffect(() => {
         if (space) {
-            setName(space.name);
-            setTheme(space.theme as "blue" | "purple" | "pink" | "default");
+            if (space.name !== name) setName(space.name);
+            if (space.theme !== theme) setTheme(space.theme as "blue" | "purple" | "pink" | "default");
         }
+        // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [space]);
 
     const handleSave = () => {

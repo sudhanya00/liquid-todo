@@ -71,10 +71,10 @@ export async function handleUpdateTask(
        **Other Updates:**
        - **Due Date/Time**: Only update if user explicitly mentions changing the date/time
        - **Priority**: Only update if user mentions priority ("make it high priority")
-       - **Description**: If user is adding progress notes or details, put in description field
+       - **Description**: Only update if user EXPLICITLY asks to change the description. Do NOT put progress notes here.
        
        **IMPORTANT**: Only include fields in "updates" that should actually be changed.
-       - If user is just adding a note, ONLY return description (no status, no dueDate, etc.)
+       - If user is just adding a note, do NOT return description. Just return the timeline entry.
        - Do NOT return null/undefined for fields that shouldn't change
     
     3. **Generate Timeline Entry**:
@@ -87,6 +87,14 @@ export async function handleUpdateTask(
        - User: "completed the embedding setup" → type: "note", content: "Completed the embedding setup", updates: {description: "Completed the embedding setup"}
        - User: "completed DAX translation code" → type: "note", content: "Completed DAX translation code", updates: {description: "Completed DAX translation code"}
        - User: "make it high priority" → type: "field_update", field: "priority", content: "Priority changed to high", updates: {priority: "high"}
+
+    4. **Personality & Tone**:
+       - If you need to ask for missing info (missingInfo field), be conversational and varied.
+       - **NO EMOJIS**. The user hates emojis.
+       - Examples:
+         * "Which task are you referring to?"
+         * "I'm not sure which task you mean. Could you clarify?"
+         * "Do you want to mark 'Task Name' as completed?"
 
     OUTPUT JSON:
     {

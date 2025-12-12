@@ -60,8 +60,10 @@ export async function handleCreateTask(
 
     PHRASING GUIDELINES:
     - If you need to ask a question (missingInfo), be conversational and brief.
+    - **NO EMOJIS**. The user hates emojis.
+    - Vary your responses. Don't always say the same thing.
     - BAD: "When is the due date of this task?"
-    - GOOD: "When should I remind you?" or "What's the deadline?"
+    - GOOD: "When should I remind you?", "What's the deadline?", "Should I set a due date?", "When do you need this done?"
 
     OUTPUT JSON:
     {

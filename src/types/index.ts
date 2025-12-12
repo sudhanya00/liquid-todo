@@ -1,9 +1,9 @@
 export interface Space {
     id: string;
     name: string;
-    color?: string;
+    theme: string;
     createdAt: number;
-    userId: string;
+    ownerId: string;
 }
 
 export interface TaskUpdate {

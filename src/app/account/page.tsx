@@ -1,10 +1,11 @@
+/* eslint-disable @next/next/no-img-element */
 "use client";
 
 import { useAuth } from "@/context/AuthContext";
 import { useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
 import { motion } from "framer-motion";
-import { Loader2, LogOut, User, CheckCircle2 } from "lucide-react";
+import { Loader2, LogOut, User } from "lucide-react";
 import { collection, query, where, getDocs } from "firebase/firestore";
 import { db } from "@/lib/firebase";
 
@@ -40,6 +41,7 @@ export default function AccountPage() {
                     if (savedTasks) {
                         const tasks = JSON.parse(savedTasks);
                         totalTasks += tasks.length;
+                        // eslint-disable-next-line @typescript-eslint/no-explicit-any
                         completedTasks += tasks.filter((t: any) => t.status === "done").length;
                     }
                 });
