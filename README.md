@@ -9,6 +9,21 @@ Just type naturally - the AI understands what you mean:
 - "Buy milk tomorrow" → Creates task with due date
 - "High priority meeting with John next Tuesday at 3pm" → Sets priority, date, and time
 - "Remind me to call mom" → Creates reminder task
+- "URGENT: fix the production bug" → Automatically sets high priority
+
+### 🧠 LLM-Powered Intent Classification
+The AI uses Gemini 2.0 Flash to understand your intent:
+- **CREATE**: "buy groceries tomorrow" → Creates new task
+- **UPDATE**: "add note to groceries" → Updates existing task
+- **COMPLETE**: "groceries is done" → Marks task complete
+- **Priority inference**: "urgent", "ASAP" → high | "eventually", "when free" → low
+- **Date parsing**: "friday", "next week", "Dec 25" → Proper dates
+
+### 💡 Smart Follow-up Questions
+The AI asks smart questions only when needed:
+- Clear tasks are created immediately
+- Vague tasks get ONE combined question (not multiple rounds)
+- Suggested improvements stored for optional enrichment later
 
 ### 🎯 Smart Context Awareness
 The AI remembers your tasks and updates them intelligently:

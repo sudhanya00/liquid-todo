@@ -5,15 +5,21 @@ import { useAuth } from "@/context/AuthContext";
 import { useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
 import { motion } from "framer-motion";
-import { Loader2, LogOut, User } from "lucide-react";
+import { Loader2, LogOut, User, Pencil, Check, X } from "lucide-react";
 import { collection, query, where, getDocs } from "firebase/firestore";
-import { db } from "@/lib/firebase";
+import { db, auth } from "@/lib/firebase";
+import { updateProfile } from "firebase/auth";
 
 export default function AccountPage() {
     const { user, loading, logout } = useAuth();
     const router = useRouter();
     const [stats, setStats] = useState({ totalSpaces: 0, totalTasks: 0, completedTasks: 0 });
     const [loadingStats, setLoadingStats] = useState(true);
+    
+    // Edit name state
+    const [isEditingName, setIsEditingName] = useState(false);
+    const [editedName, setEditedName] = useState("");
+    const [savingName, setSavingName] = useState(false);
 
     useEffect(() => {
         if (!loading && !user) {
@@ -66,6 +72,32 @@ export default function AccountPage() {
     }
 
     if (!user) return null;
+    
+    const handleStartEditName = () => {
+        setEditedName(user.displayName || "");
+        setIsEditingName(true);
+    };
+    
+    const handleSaveName = async () => {
+        if (!editedName.trim() || !auth.currentUser) return;
+        
+        setSavingName(true);
+        try {
+            await updateProfile(auth.currentUser, { displayName: editedName.trim() });
+            setIsEditingName(false);
+            // Force a re-render by updating local state
+            window.location.reload();
+        } catch (error) {
+            console.error("Failed to update name:", error);
+        } finally {
+            setSavingName(false);
+        }
+    };
+    
+    const handleCancelEditName = () => {
+        setIsEditingName(false);
+        setEditedName("");
+    };
 
     return (
         <div className="mx-auto max-w-2xl p-4 md:p-8">
@@ -87,8 +119,44 @@ export default function AccountPage() {
                             <User className="h-10 w-10 text-white/50" />
                         </div>
                     )}
-                    <div>
-                        <h1 className="text-2xl font-bold text-white">{user.displayName || "User"}</h1>
+                    <div className="flex-1">
+                        {isEditingName ? (
+                            <div className="flex items-center gap-2">
+                                <input
+                                    type="text"
+                                    value={editedName}
+                                    onChange={(e) => setEditedName(e.target.value)}
+                                    className="bg-white/10 rounded-lg px-3 py-2 text-white text-xl font-bold focus:outline-none focus:ring-2 focus:ring-white/20"
+                                    autoFocus
+                                    disabled={savingName}
+                                />
+                                <button
+                                    onClick={handleSaveName}
+                                    disabled={savingName || !editedName.trim()}
+                                    className="p-2 rounded-lg bg-green-500/20 text-green-400 hover:bg-green-500/30 disabled:opacity-50"
+                                >
+                                    {savingName ? <Loader2 className="h-4 w-4 animate-spin" /> : <Check className="h-4 w-4" />}
+                                </button>
+                                <button
+                                    onClick={handleCancelEditName}
+                                    disabled={savingName}
+                                    className="p-2 rounded-lg bg-red-500/20 text-red-400 hover:bg-red-500/30"
+                                >
+                                    <X className="h-4 w-4" />
+                                </button>
+                            </div>
+                        ) : (
+                            <div className="flex items-center gap-2">
+                                <h1 className="text-2xl font-bold text-white">{user.displayName || "User"}</h1>
+                                <button
+                                    onClick={handleStartEditName}
+                                    className="p-1.5 rounded-lg hover:bg-white/10 text-white/50 hover:text-white transition-colors"
+                                    title="Edit name"
+                                >
+                                    <Pencil className="h-4 w-4" />
+                                </button>
+                            </div>
+                        )}
                         <p className="text-white/50">{user.email}</p>
                     </div>
                 </div>

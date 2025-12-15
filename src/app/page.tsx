@@ -11,13 +11,18 @@ import { useAuth } from "@/context/AuthContext";
 import { Loader2 } from "lucide-react";
 import { collection, query, where, onSnapshot, addDoc, deleteDoc, doc, updateDoc } from "firebase/firestore";
 import { db } from "@/lib/firebase";
+import { useEntitlements } from "@/lib/hooks/useEntitlements";
+import UpgradePrompt, { QuotaDisplay } from "@/components/UpgradePrompt";
 
 export default function Home() {
     const router = useRouter();
     const { user, loading } = useAuth();
+    const { checkCanCreateSpace, limits, isPro } = useEntitlements();
     const [spaces, setSpaces] = useState<Space[]>([]);
     const [editingSpace, setEditingSpace] = useState<Space | null>(null);
     const [isLoadingSpaces, setIsLoadingSpaces] = useState(true);
+    const [showUpgradePrompt, setShowUpgradePrompt] = useState(false);
+    const [upgradeMessage, setUpgradeMessage] = useState("");
 
     useEffect(() => {
         if (!loading && !user) {
@@ -65,6 +70,14 @@ export default function Home() {
     const handleCreateSpace = async () => {
         if (!user) return;
 
+        // Check entitlement before creating
+        const entitlement = await checkCanCreateSpace(spaces.length);
+        if (!entitlement.allowed) {
+            setUpgradeMessage(entitlement.reason || "Space limit reached.");
+            setShowUpgradePrompt(true);
+            return;
+        }
+
         try {
             const newSpace = {
                 name: `New Space ${spaces.length + 1}`,
@@ -108,16 +121,28 @@ export default function Home() {
                 >
                     My Spaces
                 </motion.h1>
-                <button
-                    onClick={() => router.push("/account")}
-                    className="h-10 w-10 rounded-full bg-white/10 hover:bg-white/20 transition-colors flex items-center justify-center"
-                >
-                    {user?.photoURL ? (
-                        <img src={user.photoURL} alt="Profile" className="h-10 w-10 rounded-full" />
-                    ) : (
-                        <div className="h-10 w-10 rounded-full bg-white/10" />
+                <div className="flex items-center gap-4">
+                    {/* Space quota indicator for free users */}
+                    {!isPro && limits?.maxSpaces && (
+                        <div className="hidden sm:block w-32">
+                            <QuotaDisplay
+                                used={spaces.length}
+                                limit={limits.maxSpaces}
+                                label="Spaces"
+                            />
+                        </div>
                     )}
-                </button>
+                    <button
+                        onClick={() => router.push("/account")}
+                        className="h-10 w-10 rounded-full bg-white/10 hover:bg-white/20 transition-colors flex items-center justify-center"
+                    >
+                        {user?.photoURL ? (
+                            <img src={user.photoURL} alt="Profile" className="h-10 w-10 rounded-full" />
+                        ) : (
+                            <div className="h-10 w-10 rounded-full bg-white/10" />
+                        )}
+                    </button>
+                </div>
             </header>
 
             <motion.div
@@ -147,6 +172,15 @@ export default function Home() {
                 onClose={() => setEditingSpace(null)}
                 onSave={handleUpdateSpace}
             />
+
+            {/* Upgrade prompt modal */}
+            {showUpgradePrompt && (
+                <UpgradePrompt
+                    message={upgradeMessage}
+                    variant="modal"
+                    onDismiss={() => setShowUpgradePrompt(false)}
+                />
+            )}
         </div>
     );
 }

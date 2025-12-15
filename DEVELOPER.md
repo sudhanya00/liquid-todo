@@ -6,9 +6,9 @@ LiquidTodo is an AI-powered task management application built with Next.js, feat
 
 ### Tech Stack
 
-- **Frontend**: Next.js 16, React, TypeScript, Tailwind CSS, Framer Motion
+- **Frontend**: Next.js 14, React, TypeScript, Tailwind CSS, Framer Motion
 - **Backend**: Next.js API Routes
-- **AI**: Google Gemini API (multi-agent architecture)
+- **AI**: Google Gemini 2.0 Flash (multi-agent architecture)
 - **Database**: Firebase Firestore + localStorage (hybrid)
 - **Authentication**: Firebase Auth
 
@@ -21,7 +21,8 @@ liquid-todo/
 ├── src/
 │   ├── app/                    # Next.js App Router
 │   │   ├── api/
-│   │   │   └── parse-task/    # AI task parsing endpoint
+│   │   │   ├── parse-task/    # AI task parsing endpoint
+│   │   │   └── enhance-description/  # AI description enhancement
 │   │   ├── space/[id]/        # Task space page
 │   │   ├── login/             # Authentication
 │   │   └── page.tsx           # Home/dashboard
@@ -31,7 +32,8 @@ liquid-todo/
 │   │   └── SpaceCard.tsx      # Space list item
 │   ├── lib/                   # Core utilities
 │   │   ├── agents/            # AI Agent system
-│   │   │   ├── orchestrator.ts # Intent classification
+│   │   │   ├── classifier.ts   # LLM-powered intent classification
+│   │   │   ├── orchestrator.ts # Intent routing (uses classifier)
 │   │   │   ├── creator.ts      # Task creation
 │   │   │   └── updater.ts      # Task updates
 │   │   ├── gemini.ts          # Gemini API client
@@ -43,6 +45,8 @@ liquid-todo/
 │   │   └── index.ts           # TypeScript interfaces
 │   └── context/
 │       └── AuthContext.tsx    # Firebase auth provider
+├── scripts/
+│   └── test-agent-flow.ts     # AI classification test suite
 └── .env.local                 # Environment variables
 ```
 
@@ -55,17 +59,19 @@ liquid-todo/
 ```
 User Input
     ↓
-Orchestrator Agent (Intent Classification)
+Classifier Agent (LLM-powered intent + vagueness scoring)
+    ↓
+Orchestrator Agent (Routes to appropriate agent)
     ↓
 ├─→ Creator Agent (CREATE intent)
 ├─→ Updater Agent (UPDATE intent)
-├─→ Deleter Agent (DELETE intent)
-└─→ Query Agent (QUERY intent)
+├─→ Completer Agent (COMPLETE intent)
+└─→ Deleter Agent (DELETE intent)
 ```
 
-### 1. Orchestrator Agent (`orchestrator.ts`)
+### 1. Classifier Agent (`classifier.ts`) - NEW
 
-**Purpose**: Classify user intent and route to appropriate agent
+**Purpose**: LLM-powered intent classification with vagueness scoring
 
 **Input:**
 - User text
@@ -75,20 +81,62 @@ Orchestrator Agent (Intent Classification)
 **Output:**
 ```typescript
 {
-  intent: "create" | "update" | "delete" | "query",
-  reasoning: string,
+  intent: "create" | "update" | "complete" | "delete",
   confidence: number (0-100),
-  suggestedTaskId?: string
+  reasoning: string,
+  suggestedTaskId?: string,
+  vaguenessScore: number (0-100),  // LLM-assessed vagueness
+  contextQuestions?: string[],     // Questions for vague tasks
+  dateQuestions?: string,          // Date clarification
+  taskDetails: {
+    title: string,       // Short, 3-7 words max
+    description?: string, // All details here
+    dueDate?: string,
+    dueTime?: string,
+    priority?: "low" | "medium" | "high"
+  },
+  suggestedImprovements?: string[] // Optional follow-up questions
 }
 ```
 
 **Key Features:**
-- Full task context awareness
-- Fuzzy matching for task identification
-- Confidence scoring
-- Smart CREATE vs UPDATE distinction
+- LLM-based vagueness scoring (0-100)
+- Priority inference from keywords (URGENT→high, eventually→low)
+- Natural language date parsing
+- Short title extraction (details → description)
+- Suggested improvements for task enrichment
 
-### 2. Creator Agent (`creator.ts`)
+**Vagueness Thresholds:**
+- 0-30: Clear task - create immediately
+- 31-60: Medium - ask for due date only
+- 61-100: Vague - ask ONE combined question
+
+### 2. Orchestrator Agent (`orchestrator.ts`)
+
+**Purpose**: Route to appropriate agent based on classifier output
+
+**Input:**
+- User text
+- All existing tasks
+- Current date
+
+**Output:**
+```typescript
+{
+  intent: "create" | "update" | "complete" | "delete",
+  reasoning: string,
+  confidence: number (0-100),
+  suggestedTaskId?: string,
+  vaguenessScore?: number  // Passed through from classifier
+}
+```
+
+**Key Features:**
+- Uses Classifier Agent for LLM-powered intent detection
+- Passes through vaguenessScore for follow-up decisions
+- Full task context awareness
+
+### 3. Creator Agent (`creator.ts`)
 
 **Purpose**: Parse task creation requests
 
@@ -110,11 +158,11 @@ Orchestrator Agent (Intent Classification)
 ```
 
 **Key Features:**
-- Concise title extraction (max 5-7 words)
+- Concise title extraction (max 3-7 words)
 - Natural language date parsing
 - Missing information detection
 
-### 3. Updater Agent (`updater.ts`)
+### 4. Updater Agent (`updater.ts`)
 
 **Purpose**: Handle task updates and generate timeline entries
 
@@ -153,6 +201,32 @@ Orchestrator Agent (Intent Classification)
 - Smart status change detection
 - Confirmation for ambiguous completions
 
+### 5. Description Enhancement API (`/api/enhance-description`)
+
+**Purpose**: Enhance (not replace) existing task descriptions with new context
+
+**Input:**
+```typescript
+{
+  existingDescription: string;
+  newContext: string;
+  taskTitle: string;
+}
+```
+
+**Output:**
+```typescript
+{
+  enhancedDescription: string;
+}
+```
+
+**Key Features:**
+- Integrates new information naturally into existing description
+- Preserves existing context
+- Called on task updates and suggestion answers
+- No "Polish" button (cost protection)
+
 ---
 
 ## Data Models
@@ -171,7 +245,8 @@ interface Task {
   status: "todo" | "in-progress" | "done";
   createdAt: number;
   updatedAt: number;
-  updates?: TaskUpdate[];  // Activity timeline
+  updates?: TaskUpdate[];           // Activity timeline
+  suggestedImprovements?: string[]; // Optional follow-up questions
 }
 ```
 

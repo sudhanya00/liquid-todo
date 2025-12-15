@@ -1,6 +1,5 @@
 import { getGeminiModel } from "@/lib/gemini";
 import { Task, TaskUpdate } from "@/types";
-import { findBestTaskMatch } from "@/lib/taskMatcher";
 
 interface UpdaterResponse {
     taskId: string | null;
@@ -22,16 +21,21 @@ export async function handleUpdateTask(
     currentDate: string,
     suggestedTaskId?: string
 ): Promise<UpdaterResponse> {
-    // Try fuzzy matching if no suggested task ID
+    // Target task is now provided by the smart classifier (no more fuzzy matching!)
     let targetTask: Task | undefined;
 
     if (suggestedTaskId) {
         targetTask = tasks.find(t => t.id === suggestedTaskId);
-    } else {
-        const match = findBestTaskMatch(text, tasks);
-        if (match) {
-            targetTask = match.task;
-        }
+    }
+    
+    // If no target task found, return error (classifier should have caught this)
+    if (!targetTask) {
+        console.log("[Updater] No target task found for ID:", suggestedTaskId);
+        return {
+            taskId: null,
+            updates: {},
+            missingInfo: "Could not find the task you're referring to. Please specify which task you want to update.",
+        };
     }
 
     // Build context with ALL tasks
@@ -41,19 +45,18 @@ export async function handleUpdateTask(
 
     const SYSTEM_PROMPT = `
     You are the Updater Agent for an AI-powered Todo App.
-    Your job is to identify which task to update and generate structured updates + timeline entries.
+    Your job is to generate structured updates + timeline entries for the specified task.
 
     CONTEXT:
     1. Current Date: ${currentDate}
     2. ALL Existing Tasks:
     ${tasksContext}
-    ${targetTask ? `\n3. SUGGESTED TASK (from Orchestrator): [ID: ${targetTask.id}] "${targetTask.title}"` : ''}
+    3. TARGET TASK TO UPDATE: [ID: ${targetTask.id}] "${targetTask.title}" [Status: ${targetTask.status}]
 
     RUBRIC:
-    1. **Identify Task**: 
-       - Use the SUGGESTED TASK if provided
-       - Otherwise, FUZZY MATCH user input to closest task
-       - Examples: "milk" → "Get milk", "pipeline 2" → "Pipeline 2 Testing", "DAX" → "Development of Agent 2"
+    1. **Task Already Identified**: 
+       - The target task has been identified by our smart classifier
+       - Focus on determining WHAT updates to make
     
     2. **Determine Updates**:
        **CRITICAL STATUS LOGIC:**
