@@ -1,12 +1,11 @@
 import { NextResponse } from "next/server";
 import { orchestrateIntent } from "@/lib/agents/orchestrator";
-import { handleCreateTask } from "@/lib/agents/creator";
 import { handleUpdateTask } from "@/lib/agents/updater";
 import { Task } from "@/types";
 
 export async function POST(req: Request) {
   try {
-    const { text, tasks } = await req.json();
+    const { text, tasks, spaceName, recentActivity } = await req.json();
 
     if (!text) {
       return NextResponse.json({ error: "Text is required" }, { status: 400 });
@@ -21,48 +20,217 @@ export async function POST(req: Request) {
       minute: '2-digit'
     });
 
-    // 1. Orchestrate Intent (now passes full Task objects)
-    console.log("Orchestrating intent for:", text);
-    const orchestration = await orchestrateIntent(text, tasks || [], currentDate);
-    console.log("Intent detected:", orchestration.intent, "Confidence:", orchestration.confidence);
+    // 1. Smart Orchestration with full context (NO fuzzy matching!)
+    console.log("[Parse-Task] Input:", text);
+    console.log("[Parse-Task] Context:", { taskCount: tasks?.length || 0, spaceName });
+    
+    const orchestration = await orchestrateIntent(
+      text, 
+      tasks || [], 
+      currentDate,
+      spaceName,
+      recentActivity
+    );
+    
+    console.log("[Parse-Task] Classification:", {
+      intent: orchestration.intent,
+      confidence: orchestration.confidence,
+      reasoning: orchestration.reasoning,
+      taskDetails: orchestration.taskDetails,
+      targetTaskId: orchestration.suggestedTaskId,
+    });
 
-    // 2. Route to Specific Agent
-    if (orchestration.intent === "create") {
-      // Build context string for Creator (still uses string context)
-      const tasksContext = tasks && tasks.length > 0
-        ? tasks.map((t: Task) => `- [${t.id}] ${t.title} (Status: ${t.status}, Due: ${t.dueDate || 'None'})`).join("\n")
-        : "No existing tasks.";
-
-      const result = await handleCreateTask(text, tasksContext, currentDate);
-      return NextResponse.json({ action: "create", ...result });
-
-    } else if (orchestration.intent === "update") {
-      const result = await handleUpdateTask(
-        text,
-        tasks || [],
-        currentDate,
-        orchestration.suggestedTaskId
-      );
-      return NextResponse.json({ action: "update", ...result });
-
-    } else if (orchestration.intent === "delete") {
-      const result = await handleUpdateTask(
-        text,
-        tasks || [],
-        currentDate,
-        orchestration.suggestedTaskId
-      );
-      return NextResponse.json({ action: "update", ...result });
-
-    } else {
-      // Query or Unknown
+    // 2. Handle clarify intent or low confidence
+    if (orchestration.intent === "clarify") {
       return NextResponse.json({
-        missingInfo: "I can currently only Create or Update tasks. I'm learning to answer questions soon!"
+        action: "clarify",
+        question: orchestration.clarifyingQuestion,
+        missingInfo: orchestration.classification.missingInfo,
+        confidence: orchestration.confidence,
+        reasoning: orchestration.reasoning,
+        followUpQuestions: orchestration.followUpQuestions,
       });
     }
 
+    // 3. Route to appropriate agent based on intent
+    if (orchestration.intent === "create") {
+      // Use task details from classifier
+      const taskDetails = orchestration.taskDetails;
+      const followUps = orchestration.followUpQuestions || [];
+      const title = taskDetails?.title || text;
+      const vaguenessScore = orchestration.classification.vaguenessScore ?? 50;
+      
+      console.log("[Parse-Task] Vagueness score:", vaguenessScore, "Reason:", orchestration.classification.vagueReason);
+      
+      // Separate date questions from contextual clarifying questions
+      const dateQuestions = followUps.filter(q => 
+        q.toLowerCase().includes('when') || 
+        q.toLowerCase().includes('deadline') ||
+        q.toLowerCase().includes('due') ||
+        q.toLowerCase().includes('timeline')
+      );
+      
+      const contextQuestions = followUps.filter(q => 
+        !q.toLowerCase().includes('when') && 
+        !q.toLowerCase().includes('deadline') &&
+        !q.toLowerCase().includes('due') &&
+        !q.toLowerCase().includes('timeline')
+      );
+      
+      // HIGH VAGUENESS (61+): Combine ALL questions into ONE smart question
+      // Ask context + date together: "What are you deploying, to which environment, and when?"
+      const VAGUENESS_THRESHOLD = 60;
+      
+      if (vaguenessScore > VAGUENESS_THRESHOLD && contextQuestions.length > 0) {
+        console.log("[Parse-Task] High vagueness - asking combined smart question");
+        
+        // Build a combined question with all context questions + date
+        const allQuestions = [...contextQuestions];
+        if (!taskDetails?.dueDate) {
+          allQuestions.push(dateQuestions[0] || "what's the deadline?");
+        }
+        
+        // Combine into one natural question
+        let combinedQuestion: string;
+        if (allQuestions.length === 1) {
+          combinedQuestion = allQuestions[0];
+        } else if (allQuestions.length === 2) {
+          // "What service? And when?" -> "What service and when is it due?"
+          combinedQuestion = `${allQuestions[0].replace(/\?$/, '')} and ${allQuestions[1].toLowerCase()}`;
+        } else {
+          // Multiple questions: "What service, to which env, and when?"
+          const lastQ = allQuestions.pop()!;
+          combinedQuestion = `${allQuestions.map(q => q.replace(/\?$/, '')).join(', ')}, and ${lastQ.toLowerCase()}`;
+        }
+        
+        return NextResponse.json({
+          action: "clarify",
+          question: combinedQuestion,
+          pendingTask: {
+            title: title,
+            description: taskDetails?.description,
+            priority: taskDetails?.priority || "medium",
+          },
+          vaguenessScore: vaguenessScore,
+          confidence: orchestration.confidence,
+          reasoning: orchestration.classification.vagueReason || "Need more context to understand the task",
+        });
+      }
+      
+      // MEDIUM/LOW VAGUENESS: Only ask for due date if missing
+      if (!taskDetails?.dueDate) {
+        console.log("[Parse-Task] Missing due date, asking user");
+        const dateQuestion = dateQuestions[0] || "When do you need this done by?";
+        
+        // If there are context questions but task isn't super vague, store them as suggestions
+        return NextResponse.json({
+          action: "clarify",
+          question: dateQuestion,
+          pendingTask: {
+            title: title,
+            description: taskDetails?.description,
+            priority: taskDetails?.priority || "medium",
+            // Pass remaining context questions as optional improvements
+            suggestedImprovements: contextQuestions.length > 0 ? contextQuestions : undefined,
+          },
+          confidence: orchestration.confidence,
+          reasoning: "Due date is required to create a task",
+        });
+      }
+      
+      // We have due date - create the task immediately
+      // Include improvement suggestions as optional enhancements user can answer later
+      return NextResponse.json({ 
+        action: "create", 
+        task: {
+          title: taskDetails.title,
+          description: taskDetails.description,
+          priority: taskDetails.priority || "medium",
+          dueDate: taskDetails.dueDate,
+          // Store suggestions on the task - user can optionally answer these later
+          suggestedImprovements: contextQuestions.length > 0 ? contextQuestions : undefined,
+        },
+        confidence: orchestration.confidence,
+        reasoning: orchestration.reasoning,
+      });
+
+    } else if (orchestration.intent === "update") {
+      // Use the target task ID from classifier
+      const targetTaskId = orchestration.suggestedTaskId;
+      
+      if (!targetTaskId) {
+        // Classifier couldn't find a matching task - this shouldn't happen
+        // but if it does, fall back to create
+        console.log("[Parse-Task] No target task for update, falling back to create");
+        return NextResponse.json({
+          action: "create",
+          task: { title: text },
+          followUpQuestions: ["I couldn't find the task you're referring to. Want me to create a new task instead?"],
+          confidence: 50,
+          reasoning: "Could not identify target task for update",
+        });
+      }
+
+      const result = await handleUpdateTask(
+        text,
+        tasks || [],
+        currentDate,
+        targetTaskId
+      );
+      
+      // Merge updates from classifier
+      if (orchestration.updates) {
+        result.updates = { ...result.updates, ...orchestration.updates };
+      }
+
+      return NextResponse.json({ 
+        action: "update", 
+        ...result,
+        followUpQuestions: orchestration.followUpQuestions,
+        confidence: orchestration.confidence,
+        reasoning: orchestration.reasoning,
+      });
+
+    } else if (orchestration.intent === "delete") {
+      const targetTaskId = orchestration.suggestedTaskId;
+      
+      if (!targetTaskId) {
+        return NextResponse.json({
+          action: "clarify",
+          question: "Which task would you like to delete?",
+          confidence: 50,
+        });
+      }
+
+      const targetTask = tasks?.find((t: Task) => t.id === targetTaskId);
+
+      return NextResponse.json({ 
+        action: "delete", 
+        taskId: targetTaskId,
+        taskTitle: targetTask?.title,
+        confidence: orchestration.confidence,
+        reasoning: orchestration.reasoning,
+      });
+
+    } else if (orchestration.intent === "query") {
+      return NextResponse.json({
+        action: "query",
+        queryType: orchestration.classification.queryType,
+        message: "Query support coming soon! For now I can create and update tasks.",
+        followUpQuestions: ["Would you like me to create a task instead?"],
+      });
+    }
+
+    // Fallback
+    return NextResponse.json({
+      action: "create",
+      task: { title: text },
+      confidence: 50,
+      reasoning: "Unknown intent, defaulting to create",
+    });
+
   } catch (error) {
-    console.error("AI Parse Error:", error);
+    console.error("[Parse-Task] Error:", error);
     return NextResponse.json({ error: "Failed to parse task" }, { status: 500 });
   }
 }

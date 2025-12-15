@@ -1,4 +1,6 @@
 import { getGeminiModel } from "@/lib/gemini";
+import { generateFollowUpQuestions, shouldAskFollowUp, FollowUpQuestion } from "./followUpAgent";
+import { Task } from "@/types";
 
 interface CreatorResponse {
     newTask?: {
@@ -8,13 +10,23 @@ interface CreatorResponse {
         priority: "low" | "medium" | "high";
         description: string;
     };
+    task?: {
+        title: string;
+        dueDate: string | null;
+        dueTime?: string;
+        priority: "low" | "medium" | "high";
+        description: string;
+    };
     missingInfo?: string;
+    followUpQuestions?: FollowUpQuestion[];
+    taskCompleteness?: number;
 }
 
 export async function handleCreateTask(
     text: string,
     tasksContext: string,
-    currentDate: string
+    currentDate: string,
+    existingTasks?: Task[]
 ): Promise<CreatorResponse> {
     const SYSTEM_PROMPT = `
     You are the Creator Agent. Your job is to extract details for a NEW task.
@@ -36,34 +48,29 @@ export async function handleCreateTask(
        - If user mentions "agent X", include "Agent X" in title
        - Remove implementation details from title (put in description instead)
        - Keep it short and scannable
+       - PRESERVE the user's language - if they say "Complete X", title is "Complete X"
        
-    2. **Due Date**: Required. 
-       - First, check if the user mentions another task (e.g., "with milk", "same as the report", "one week after agent 1").
-       - If YES, look up that task in "Existing Tasks" and calculate relative to its Due Date.
-       - If NO, look for explicit dates (e.g., "tomorrow", "next Friday", "next week").
-       - **CRITICAL**: If NO explicit date and NO context found, you MUST return "missingInfo". Do NOT default to today. Do NOT guess.
+    2. **Due Date**: Parse if mentioned, otherwise null.
+       - Look for explicit dates: "tomorrow", "next Friday", "in 2 days", "by EOD"
+       - Look for relative references to other tasks
+       - **If no date mentioned, set to null** - we'll ask a smart follow-up
        
     3. **Due Time**: Optional but IMPORTANT. Extract if mentioned:
        - Explicit times: "at 2pm", "by 3:30", "9am" → Format as 24-hour (e.g., "14:00", "09:00")
-       - Relative times:
-         * "morning" → "09:00"
-         * "afternoon" → "14:00"
-         * "evening" → "18:00"
-         * "night" → "21:00"
-       - If user says "evening" or similar, DO NOT leave empty. Use the appropriate default time.
+       - Relative times: "morning"→"09:00", "afternoon"→"14:00", "evening"→"18:00"
        
-    4. **Priority**: Infer (Low/Medium/High). Default to Medium if unspecified.
+    4. **Priority**: Infer from context:
+       - High: "urgent", "ASAP", "critical", "blocking", "important"
+       - Low: "when you get a chance", "eventually", "someday"
+       - Medium: Default if unclear
     
     5. **Description**: Extract implementation details and extra context.
-       - Put ALL technical details here (Azure blob, vectorDB, DAX, etc.)
-       - This is where the "how" goes, not the "what"
+       - Put technical details here (APIs, tools, steps)
+       - If user gives context about WHY, put it here
+       - Can be empty for simple tasks
 
-    PHRASING GUIDELINES:
-    - If you need to ask a question (missingInfo), be conversational and brief.
-    - **NO EMOJIS**. The user hates emojis.
-    - Vary your responses. Don't always say the same thing.
-    - BAD: "When is the due date of this task?"
-    - GOOD: "When should I remind you?", "What's the deadline?", "Should I set a due date?", "When do you need this done?"
+    **CRITICAL: Always return the task, even without a due date.**
+    Do NOT ask for missing info - the follow-up system will handle that separately.
 
     OUTPUT JSON:
     {
@@ -72,9 +79,8 @@ export async function handleCreateTask(
             "dueDate": "ISO string or null",
             "dueTime": "HH:MM (optional)",
             "priority": "low" | "medium" | "high",
-            "description": "string (detailed implementation notes)"
-        },
-        "missingInfo": "string or null"
+            "description": "string (can be empty)"
+        }
     }
     `;
 
@@ -89,7 +95,52 @@ export async function handleCreateTask(
     jsonStr = jsonStr.replace(/```json/g, "").replace(/```/g, "").trim();
 
     try {
-        return JSON.parse(jsonStr);
+        const parsed = JSON.parse(jsonStr);
+        
+        // If we have a task, check for mandatory fields
+        if (parsed.newTask) {
+            // MANDATORY: Always ask for due date if not provided
+            if (!parsed.newTask.dueDate) {
+                parsed.missingInfo = "When do you need this done by?";
+                parsed.task = parsed.newTask; // Keep the task data for after follow-up
+                return parsed;
+            }
+            
+            // Optional: Ask smart follow-up questions for additional context
+            if (existingTasks) {
+                const shouldAsk = shouldAskFollowUp(
+                    parsed.newTask.title,
+                    !!parsed.newTask.dueDate,
+                    parsed.newTask.priority !== "medium"
+                );
+                
+                if (shouldAsk) {
+                    const followUpAnalysis = await generateFollowUpQuestions(
+                        parsed.newTask.title,
+                        parsed.newTask.description || null,
+                        existingTasks
+                    );
+                    
+                    // Only include follow-ups if task is incomplete and has critical/recommended questions
+                    const importantQuestions = followUpAnalysis.questions.filter(
+                        q => q.importance === "critical" || q.importance === "recommended"
+                    );
+                    
+                    if (followUpAnalysis.taskCompleteness < 80 && importantQuestions.length > 0) {
+                        parsed.followUpQuestions = importantQuestions;
+                        parsed.taskCompleteness = followUpAnalysis.taskCompleteness;
+                        
+                        // For critical questions, also set missingInfo with the first question
+                        const criticalQ = importantQuestions.find(q => q.importance === "critical");
+                        if (criticalQ) {
+                            parsed.missingInfo = criticalQ.question;
+                        }
+                    }
+                }
+            }
+        }
+        
+        return parsed;
     } catch (e) {
         console.error("Creator JSON Parse Error", e);
         return { missingInfo: "I couldn't understand the task details. Could you try again?" };

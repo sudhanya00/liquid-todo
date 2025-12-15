@@ -1,103 +1,149 @@
-import { getGeminiModel } from "@/lib/gemini";
-import { Task } from "@/types";
+/**
+ * Smart Orchestrator - The Brain of Task Management
+ * 
+ * Uses LLM-powered classification (no fuzzy matching!) to:
+ * 1. Understand user intent with full context awareness
+ * 2. Route to appropriate agents
+ * 3. Generate intelligent follow-up questions
+ * 4. Handle ambiguous requests gracefully
+ */
 
-interface OrchestratorResponse {
-    intent: "create" | "update" | "delete" | "query";
+import { Task } from "@/types";
+import { classifyIntent, ClassificationResult, SpaceContext, generateSmartFollowUps } from "./classifier";
+
+// Legacy interface for backward compatibility
+export interface OrchestratorResponse {
+    intent: "create" | "update" | "delete" | "query" | "clarify";
     reasoning: string;
-    confidence: number; // 0-100
-    suggestedTaskId?: string; // For update/delete intents
+    confidence: number;
+    suggestedTaskId?: string;
+    clarifyingQuestion?: string;
+    
+    // New fields from smart classifier
+    taskDetails?: ClassificationResult["taskDetails"];
+    updates?: ClassificationResult["updates"];
+    followUpQuestions?: string[];
 }
 
+// Enhanced response with full classification data
+export interface SmartOrchestratorResponse extends OrchestratorResponse {
+    classification: ClassificationResult;
+    taskDetails?: ClassificationResult["taskDetails"];
+}
+
+/**
+ * Main orchestration function - routes user input to appropriate handler
+ */
 export async function orchestrateIntent(
     text: string,
     tasks: Task[],
-    currentDate: string
-): Promise<OrchestratorResponse> {
-    // Build rich context with ALL tasks
-    const tasksContext = tasks.length > 0
-        ? tasks.map((t, idx) => `${idx + 1}. [ID: ${t.id}] "${t.title}"${t.description ? ` - ${t.description.substring(0, 100)}` : ''}`).join('\n')
-        : "No existing tasks.";
-
-    const SYSTEM_PROMPT = `
-    You are the Orchestrator Agent for an AI-powered Todo App (like JIRA).
-    Your job is to classify the user's intent and identify which task they're referring to (if any).
-
-    CONTEXT:
-    1. Current Date: ${currentDate}
-    2. ALL Existing Tasks in this Space:
-    ${tasksContext}
-
-    INTENT CATEGORIES:
-    - "create": User wants to add a NEW task.
-      Examples: "Buy milk", "Remind me to call John tomorrow"
+    currentDate: string,
+    spaceName?: string,
+    recentActivity?: SpaceContext["recentActivity"]
+): Promise<SmartOrchestratorResponse> {
+    console.log("[Orchestrator] Processing:", text);
+    console.log("[Orchestrator] Context:", { taskCount: tasks.length, spaceName });
     
-    - "update": User wants to modify or add details to an EXISTING task.
-      Examples: 
-        * "DI only drinks A2 milk" (adding detail to recent "Get milk" task)
-        * "Pipeline 2 is done" (updating status of Pipeline 2 task)
-        * "Add a note to the leaseweb task: needs testing"
-        * "I finished the report"
+    // Build rich context for LLM
+    const context: SpaceContext = {
+        spaceId: "current",
+        spaceName: spaceName || "Current Space",
+        tasks,
+        recentActivity,
+    };
     
-    - "delete": User wants to remove a task.
-      Examples: "Delete the shopping task", "Remove the meeting"
+    // Use LLM classifier - NO fuzzy matching!
+    const classification = await classifyIntent(text, context);
     
-    - "query": User is asking a question.
-      Examples: "What's due today?", "Show me high priority tasks"
-
-    CRITICAL LOGIC FOR SMART CONTEXT AWARENESS:
-    1. **Review ALL existing tasks** before deciding intent
-    2. **Fuzzy matching**: "milk" matches "Get milk tomorrow"
-    3. **Context clues**: 
-       - If user mentions details/notes WITHOUT a deadline → likely UPDATE
-       - If user says "finished", "done", "complete" → UPDATE
-       - If user provides a task name + new info → UPDATE
-    4. **Confidence**: Rate 0-100 how confident you are
-       - 90-100: Very clear intent
-       - 70-89: Likely correct
-       - 50-69: Uncertain
-       - <50: Ambiguous
-    5. **Task Identification**: If UPDATE/DELETE, provide the task ID you think they're referring to
-
-    EXAMPLES:
-    User: "remind me to get milk tomorrow"
-    Tasks: []
-    → Intent: create, Confidence: 95
-
-    User: "DI only drinks A2 milk"
-    Tasks: [1. "Get milk"]
-    → Intent: update, Confidence: 85, suggestedTaskId: <milk task ID>
-
-    User: "pipeline 2 is complete"
-    Tasks: [1. "Pipeline 1 Dev", 2. "Pipeline 2 Testing", 3. "Pipeline 3 Design"]
-    → Intent: update, Confidence: 90, suggestedTaskId: <pipeline 2 task ID>
-
-    OUTPUT JSON:
-    {
-        "intent": "create" | "update" | "delete" | "query",
-        "reasoning": "Brief explanation (1 sentence)",
-        "confidence": 0-100,
-        "suggestedTaskId": "task-id-here" (optional, for update/delete)
+    // Normalize intent to lowercase FIRST
+    const normalizedIntent = classification.intent.toLowerCase() as "create" | "update" | "complete" | "delete" | "query" | "clarify";
+    
+    // Backup: Infer priority from text if not set by classifier
+    if (classification.taskDetails && !classification.taskDetails.priority) {
+        const lower = text.toLowerCase();
+        const highKeywords = ["urgent", "asap", "critical", "important", "blocking", "emergency", "immediately", "right now", "today", "eod"];
+        const lowKeywords = ["eventually", "someday", "when you get a chance", "no rush", "low priority", "backlog", "nice to have", "whenever"];
+        
+        if (highKeywords.some(kw => lower.includes(kw))) {
+            classification.taskDetails.priority = "high";
+        } else if (lowKeywords.some(kw => lower.includes(kw))) {
+            classification.taskDetails.priority = "low";
+        } else {
+            classification.taskDetails.priority = "medium";
+        }
+        console.log("[Orchestrator] Inferred priority:", classification.taskDetails.priority);
     }
-    `;
-
-    const model = getGeminiModel();
-    const result = await model.generateContent([
-        { text: SYSTEM_PROMPT },
-        { text: `User Input: "${text}"` }
-    ]);
-
-    const response = result.response;
-    let jsonStr = response.text();
-    jsonStr = jsonStr.replace(/```json/g, "").replace(/```/g, "").trim();
-
-    try {
-        return JSON.parse(jsonStr);
-    } catch (e) {
-        console.error("Orchestrator JSON Parse Error", e);
-        return {
-            intent: "create",
-            reasoning: "Failed to parse intent, defaulting to create.",
-            confidence: 50
-        };
+    
+    console.log("[Orchestrator] Classification result:", {
+        intent: normalizedIntent,
+        confidence: classification.confidence,
+        reasoning: classification.reasoning,
+        taskDetails: classification.taskDetails,
+        vaguenessScore: classification.vaguenessScore,
+        vagueReason: classification.vagueReason,
+    });
+    
+    // Generate additional follow-up questions if needed
+    let followUpQuestions = classification.followUpQuestions || [];
+    if (normalizedIntent === "create" && classification.taskDetails) {
+        const additionalQuestions = generateSmartFollowUps(classification.taskDetails, tasks);
+        followUpQuestions = [...new Set([...followUpQuestions, ...additionalQuestions])].slice(0, 3);
     }
+    
+    // Build response
+    const response: SmartOrchestratorResponse = {
+        intent: normalizedIntent === "complete" ? "update" : normalizedIntent,
+        reasoning: classification.reasoning,
+        confidence: classification.confidence,
+        classification,
+        followUpQuestions,
+        taskDetails: classification.taskDetails, // Pass taskDetails directly
+    };
+    
+    // Add intent-specific fields
+    switch (normalizedIntent) {
+        case "create":
+            // taskDetails already set above
+            break;
+            
+        case "update":
+        case "complete":
+            response.suggestedTaskId = classification.targetTask?.id;
+            response.updates = classification.updates;
+            if (classification.intent === "complete") {
+                response.updates = { ...response.updates, status: "done" };
+            }
+            break;
+            
+        case "delete":
+            response.suggestedTaskId = classification.targetTask?.id;
+            break;
+            
+        case "clarify":
+            response.clarifyingQuestion = classification.clarifyingQuestion;
+            break;
+    }
+    
+    return response;
+}
+
+/**
+ * Quick intent check - for UI hints without full processing
+ */
+export function getQuickIntentHint(text: string): string {
+    const lowerText = text.toLowerCase().trim();
+    
+    // Very obvious patterns only
+    if (lowerText.startsWith("delete ") || lowerText.startsWith("remove ")) {
+        return "delete";
+    }
+    if (lowerText.startsWith("what ") || lowerText.startsWith("how many") || lowerText.startsWith("show ") || lowerText.startsWith("list ")) {
+        return "query";
+    }
+    if (lowerText.match(/^(mark|set)\s+.+\s+(as\s+)?(done|complete|finished)/)) {
+        return "update";
+    }
+    
+    // Default - assume create
+    return "create";
 }

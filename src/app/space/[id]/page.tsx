@@ -1,37 +1,61 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback } from "react";
 import { useParams, useRouter } from "next/navigation";
-import { motion } from "framer-motion";
-import { ArrowLeft, Loader2 } from "lucide-react";
+import { motion, AnimatePresence } from "framer-motion";
+import { ArrowLeft, Loader2, Cloud, CloudOff, AlertCircle } from "lucide-react";
 import TaskInput from "@/components/TaskInput";
 import TaskDetailModal from "@/components/TaskDetailModal";
+import VoiceInput from "@/components/VoiceInput";
+import VoicePreviewModal from "@/components/VoicePreviewModal";
 import { Task } from "@/types";
 import { useAuth } from "@/context/AuthContext";
 import { doc, getDoc } from "firebase/firestore";
 import { db } from "@/lib/firebase";
 import { getLoadingMessage } from "@/lib/loadingMessages";
+import { useTasks } from "@/lib/hooks/useTasks";
+import { RecordingResult } from "@/lib/audio/recorder";
+import { blobToBase64 } from "@/lib/audio/recorder";
+import { VoiceLogAction } from "@/lib/services/speechToText";
 
 export default function SpacePage() {
     const params = useParams();
     const router = useRouter();
-    const { user, loading } = useAuth();
+    const { user, loading: authLoading } = useAuth();
     const spaceId = params.id as string;
 
-    const [tasks, setTasks] = useState<Task[]>([]);
+    // Use cloud-based task management
+    const {
+        tasks,
+        loading: tasksLoading,
+        error: tasksError,
+        isMigrating,
+        migrationStatus,
+        addTask,
+        editTask,
+        removeTask,
+        clearError,
+    } = useTasks({ spaceId, enableMigration: true });
+
     const [isProcessing, setIsProcessing] = useState(false);
     const [aiQuestion, setAiQuestion] = useState<string | null>(null);
     const [loadingMessage, setLoadingMessage] = useState("");
     const [context, setContext] = useState<string>("");
+    const [pendingTask, setPendingTask] = useState<Partial<Task> | null>(null); // Task waiting for clarification
     const [selectedTask, setSelectedTask] = useState<Task | null>(null);
-    const [isLoaded, setIsLoaded] = useState(false);
     const [spaceName, setSpaceName] = useState<string>("");
+    
+    // Voice log state
+    const [isVoiceProcessing, setIsVoiceProcessing] = useState(false);
+    const [voicePreviewOpen, setVoicePreviewOpen] = useState(false);
+    const [voiceTranscript, setVoiceTranscript] = useState("");
+    const [voiceActions, setVoiceActions] = useState<VoiceLogAction[]>([]);
 
     useEffect(() => {
-        if (!loading && !user) {
+        if (!authLoading && !user) {
             router.push("/login");
         }
-    }, [user, loading, router]);
+    }, [user, authLoading, router]);
 
     // Fetch Space Details
     useEffect(() => {
@@ -52,37 +76,117 @@ export default function SpacePage() {
         fetchSpace();
     }, [spaceId]);
 
-    // Load tasks from localStorage on mount
+    // Keep selectedTask in sync with tasks updates
     useEffect(() => {
-        const savedTasks = localStorage.getItem(`tasks_${spaceId}`);
-        if (savedTasks) {
-            try {
-                setTasks(JSON.parse(savedTasks));
-            } catch (e) {
-                console.error("Failed to load tasks", e);
+        if (selectedTask) {
+            const updated = tasks.find(t => t.id === selectedTask.id);
+            if (updated) {
+                setSelectedTask(updated);
             }
         }
-        setIsLoaded(true);
-    }, [spaceId]);
-
-    // Save tasks to localStorage whenever they change
-    useEffect(() => {
-        if (isLoaded) {
-            localStorage.setItem(`tasks_${spaceId}`, JSON.stringify(tasks));
-        }
-    }, [tasks, spaceId, isLoaded]);
+    }, [tasks, selectedTask]);
 
     const handleTaskSubmit = async (text: string) => {
         setIsProcessing(true);
         setAiQuestion(null);
         setLoadingMessage(getLoadingMessage(text));
 
-        const fullText = context ? `${context} \nUser Answer: ${text}` : text;
+        // Check if we have a pending task waiting for clarification
+        if (pendingTask && context) {
+            // User answered the combined question (context + date in one)
+            // Enrich the task with their answer and create
+            const enrichedText = `${pendingTask.title}: ${text}`;
+            
+            console.log(`[Follow-up] User answered: "${text}" for task: "${pendingTask.title}"`);
+            
+            try {
+                const res = await fetch("/api/parse-task", {
+                    method: "POST",
+                    body: JSON.stringify({ 
+                        text: enrichedText, 
+                        tasks,
+                        spaceName,
+                    }),
+                });
+                
+                const data = await res.json();
+                console.log(`[Follow-up] API response:`, data);
+                
+                // If STILL vague after user's answer, ask again (but only once more)
+                if (data.action === "clarify" && data.question && data.vaguenessScore > 60) {
+                    console.log(`[Follow-up] Still vague, asking again: ${data.question}`);
+                    setAiQuestion(data.question);
+                    setPendingTask({
+                        ...pendingTask,
+                        title: data.pendingTask?.title || enrichedText,
+                        description: data.pendingTask?.description || pendingTask.description,
+                        priority: data.pendingTask?.priority || pendingTask.priority,
+                    });
+                    setContext(enrichedText);
+                    setIsProcessing(false);
+                    return;
+                }
+                
+                // Ready to create - use today as fallback if no date
+                const today = new Date().toISOString().split('T')[0];
+                const finalDueDate = data.task?.dueDate || data.pendingTask?.dueDate || today;
+                const finalTitle = data.task?.title || data.pendingTask?.title || pendingTask.title || "Untitled Task";
+                const finalPriority = data.task?.priority || pendingTask.priority || "medium";
+                
+                // Get suggested improvements from API response OR from the original pending task
+                const suggestedImprovements = data.task?.suggestedImprovements || 
+                    data.pendingTask?.suggestedImprovements || 
+                    (pendingTask as any).suggestedImprovements;
+                
+                // Create the task
+                const newTask = await addTask({
+                    title: finalTitle,
+                    description: data.task?.description || pendingTask.description,
+                    dueDate: finalDueDate,
+                    dueTime: data.task?.dueTime,
+                    priority: finalPriority,
+                    status: "todo",
+                    updates: [],
+                    suggestedImprovements: suggestedImprovements,
+                });
+
+                if (newTask) {
+                    generateDescription(newTask);
+                }
+                
+                // Clear ALL pending state
+                setPendingTask(null);
+                setContext("");
+            } catch (error) {
+                console.error("Error creating task:", error);
+                setAiQuestion("Sorry, something went wrong creating the task.");
+            } finally {
+                setIsProcessing(false);
+            }
+            return;
+        }
+
+        const fullText = text;
+
+        // Build recent activity context for smarter classification
+        const sortedTasks = [...tasks].sort((a, b) => 
+            new Date(b.createdAt || 0).getTime() - new Date(a.createdAt || 0).getTime()
+        );
+        const recentActivity = {
+            lastCreatedTask: sortedTasks[0],
+            lastUpdatedTask: tasks.find(t => t.updates?.length),
+            lastCompletedTask: tasks.find(t => t.status === "done"),
+        };
 
         try {
             const res = await fetch("/api/parse-task", {
                 method: "POST",
-                body: JSON.stringify({ text: fullText, tasks }),
+                body: JSON.stringify({ 
+                    text: fullText, 
+                    tasks,
+                    spaceName,
+                    recentActivity,
+                }),
             });
 
             const data = await res.json();
@@ -93,86 +197,107 @@ export default function SpacePage() {
                 return;
             }
 
-            if (data.missingInfo) {
-                setAiQuestion(data.missingInfo);
+            // Handle clarify action - ask combined question (context + date)
+            if (data.action === "clarify" && data.question) {
+                console.log(`[New Task] Needs clarification: ${data.question}`);
+                console.log(`[New Task] Vagueness score: ${data.vaguenessScore || 'N/A'}`);
+                setAiQuestion(data.question);
                 setContext(fullText);
-            } else {
-                if (data.action === "create" && data.newTask) {
-                    const newTask: Task = {
-                        id: Date.now().toString(),
-                        spaceId,
-                        title: data.newTask.title || "Untitled Task",
-                        description: data.newTask.description,
-                        dueDate: data.newTask.dueDate,
-                        dueTime: data.newTask.dueTime,
-                        priority: data.newTask.priority || "medium",
+                // Store pending task
+                if (data.pendingTask) {
+                    setPendingTask(data.pendingTask);
+                }
+                return;
+            }
+            
+            // Handle create action
+            if (data.action === "create") {
+                const taskData = data.task || data.newTask;
+                if (taskData) {
+                    // Create task in Firestore with suggested improvements
+                    const newTask = await addTask({
+                        title: taskData.title || "Untitled Task",
+                        description: taskData.description,
+                        dueDate: taskData.dueDate,
+                        dueTime: taskData.dueTime,
+                        priority: taskData.priority || "medium",
                         status: "todo",
-                        createdAt: Date.now(),
-                        updatedAt: Date.now(),
-                        updates: [], // Initialize empty timeline
-                    };
-                    setTasks([newTask, ...tasks]);
-                } else if (data.action === "update" && data.taskId) {
-                    setTasks(tasks.map(t => {
-                        if (t.id === data.taskId) {
-                            // Handle description updates (overwrite if provided, don't append)
-                            const newDescription = data.updates?.description || t.description;
+                        updates: [],
+                        // Save AI-generated improvement suggestions
+                        suggestedImprovements: taskData.suggestedImprovements,
+                    });
 
-                            // Add timeline entry if provided
-                            const newUpdates = data.timeline
-                                ? [...(t.updates || []), { ...data.timeline, id: Date.now().toString(), timestamp: Date.now() }]
-                                : t.updates;
-
-                            // Build update object - only include fields that are explicitly in data.updates
-                            // eslint-disable-next-line @typescript-eslint/no-explicit-any
-                            const updatedTask: any = {
-                                ...t,
-                                description: newDescription,
-                                updates: newUpdates,
-                                updatedAt: Date.now()
-                            };
-
-                            // Only update fields that are explicitly provided in data.updates
-                            if (data.updates) {
-                                if ('status' in data.updates && data.updates.status) {
-                                    updatedTask.status = data.updates.status;
-                                }
-                                if ('priority' in data.updates && data.updates.priority) {
-                                    updatedTask.priority = data.updates.priority;
-                                }
-                                if ('dueDate' in data.updates) {
-                                    updatedTask.dueDate = data.updates.dueDate;
-                                }
-                                if ('dueTime' in data.updates) {
-                                    updatedTask.dueTime = data.updates.dueTime;
-                                }
-                                if ('title' in data.updates && data.updates.title) {
-                                    updatedTask.title = data.updates.title;
-                                }
-                            }
-
-                            return updatedTask;
-                        }
-                        return t;
-                    }));
-
-                    // Trigger description generation for the updated task
-                    const updatedTask = tasks.find(t => t.id === data.taskId);
-                    if (updatedTask) {
-                        // We need to construct the task object as it WILL be after state update
-                        // This is a bit tricky with React state, so we'll pass the constructed object
-                        // Re-using the logic from above (simplified for the call)
-                        const taskForGen = {
-                            ...updatedTask,
-                            description: data.updates?.description || updatedTask.description,
-                            updates: data.timeline ? [...(updatedTask.updates || []), { ...data.timeline, id: Date.now().toString(), timestamp: Date.now() }] : updatedTask.updates,
-                            // ... apply other updates if needed for context
-                        };
-                        generateDescription(taskForGen);
+                    // Generate description in background
+                    if (newTask) {
+                        generateDescription(newTask);
                     }
                 }
-                setContext("");
+            } else if (data.action === "update" && data.taskId) {
+                const existingTask = tasks.find(t => t.id === data.taskId);
+                if (existingTask) {
+                    // Build updates object
+                    const updates: Partial<Task> = {};
+
+                    // Handle description updates - always enhance with AI, never replace
+                    if (data.updates?.description) {
+                        try {
+                            const enhanceRes = await fetch("/api/enhance-description", {
+                                method: "POST",
+                                headers: { "Content-Type": "application/json" },
+                                body: JSON.stringify({
+                                    taskTitle: existingTask.title,
+                                    currentDescription: existingTask.description || "",
+                                    question: data.timeline?.type === "note" ? "Progress update" : "Update",
+                                    answer: data.updates.description,
+                                }),
+                            });
+                            if (enhanceRes.ok) {
+                                const enhanceData = await enhanceRes.json();
+                                updates.description = enhanceData.enhancedDescription;
+                            }
+                        } catch (e) {
+                            console.error("Failed to enhance description:", e);
+                            // Fallback: append the update
+                            updates.description = (existingTask.description || "") + 
+                                `\n\n**Update:** ${data.updates.description}`;
+                        }
+                    }
+
+                    // Add timeline entry if provided
+                    if (data.timeline) {
+                        const newUpdates = [
+                            ...(existingTask.updates || []),
+                            { ...data.timeline, id: Date.now().toString(), timestamp: Date.now() }
+                        ];
+                        updates.updates = newUpdates;
+                    }
+
+                    // Only update fields that are explicitly provided
+                    if (data.updates) {
+                        if ('status' in data.updates && data.updates.status) {
+                            updates.status = data.updates.status;
+                        }
+                        if ('priority' in data.updates && data.updates.priority) {
+                            updates.priority = data.updates.priority;
+                        }
+                        if ('dueDate' in data.updates) {
+                            updates.dueDate = data.updates.dueDate;
+                        }
+                        if ('dueTime' in data.updates) {
+                            updates.dueTime = data.updates.dueTime;
+                        }
+                        if ('title' in data.updates && data.updates.title) {
+                            updates.title = data.updates.title;
+                        }
+                    }
+
+                    await editTask(data.taskId, updates);
+                    
+                    // DON'T regenerate description on status/field updates
+                    // Description should only be generated on task creation
+                }
             }
+            setContext("");
         } catch (error) {
             console.error("Error:", error);
             setAiQuestion("Sorry, something went wrong. Please try again.");
@@ -189,50 +314,127 @@ export default function SpacePage() {
             });
             const data = await res.json();
             if (data.description) {
-                setTasks(prev => prev.map(t =>
-                    t.id === task.id ? { ...t, description: data.description } : t
-                ));
+                await editTask(task.id, { description: data.description });
             }
         } catch (error) {
             console.error("Failed to generate description:", error);
         }
     };
 
-    const handleUpdateTask = (taskId: string, updates: Partial<Task>) => {
-        let updatedTask: Task | undefined;
-
-        setTasks(prev => prev.map(t => {
-            if (t.id === taskId) {
-                // CRITICAL: Only update fields that are explicitly provided
-                // Preserve all existing fields that aren't being changed
-                const newTask = {
-                    ...t,
-                    ...(updates.status !== undefined && { status: updates.status }),
-                    ...(updates.priority !== undefined && { priority: updates.priority }),
-                    ...(updates.dueDate !== undefined && { dueDate: updates.dueDate }),
-                    ...(updates.dueTime !== undefined && { dueTime: updates.dueTime }),
-                    ...(updates.title !== undefined && { title: updates.title }),
-                    ...(updates.description !== undefined && { description: updates.description }),
-                    updatedAt: Date.now()
-                };
-                updatedTask = newTask;
-                return newTask;
+    // Voice log handlers
+    const handleVoiceRecordingComplete = useCallback(async (result: RecordingResult) => {
+        setIsVoiceProcessing(true);
+        
+        try {
+            // Convert audio blob to base64
+            const audioBase64 = await blobToBase64(result.blob);
+            
+            // Prepare existing tasks for context
+            const existingTasks = tasks.map(t => ({
+                id: t.id,
+                title: t.title,
+                status: t.status,
+            }));
+            
+            // Call voice-log API
+            const res = await fetch("/api/voice-log", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({
+                    audioBase64,
+                    mimeType: result.mimeType,
+                    spaceId,
+                    existingTasks,
+                }),
+            });
+            
+            const data = await res.json();
+            
+            if (!data.success) {
+                setAiQuestion(data.error || "Failed to process voice log.");
+                return;
             }
-            return t;
-        }));
-
-        // Trigger description update in background if significant changes
-        if (updatedTask && (updates.status || updates.updates)) { // updates.updates check is for when timeline changes
-            // Small delay to let state settle/debounce could be added here if needed
-            generateDescription(updatedTask);
+            
+            // Show preview modal with transcript and actions
+            setVoiceTranscript(data.transcript);
+            setVoiceActions(data.actions || []);
+            setVoicePreviewOpen(true);
+            
+        } catch (error) {
+            console.error("Voice log error:", error);
+            setAiQuestion("Failed to process voice recording. Please try again.");
+        } finally {
+            setIsVoiceProcessing(false);
         }
+    }, [tasks, spaceId]);
+    
+    const handleVoiceActionsConfirm = useCallback(async (actions: VoiceLogAction[]) => {
+        for (const action of actions) {
+            try {
+                switch (action.type) {
+                    case "CREATE":
+                        if (action.task) {
+                            const newTask = await addTask({
+                                title: action.task.title,
+                                description: action.task.description,
+                                dueDate: action.task.dueDate,
+                                priority: action.task.priority || "medium",
+                                status: "todo",
+                                updates: [],
+                            });
+                            if (newTask) {
+                                generateDescription(newTask);
+                            }
+                        }
+                        break;
+                    
+                    case "UPDATE":
+                        if (action.taskId && action.updates) {
+                            const updates: Partial<Task> = {};
+                            if (action.updates.status) updates.status = action.updates.status;
+                            if (action.updates.priority) updates.priority = action.updates.priority;
+                            if (action.updates.note) {
+                                const existingTask = tasks.find(t => t.id === action.taskId);
+                                if (existingTask) {
+                                    updates.updates = [
+                                        ...(existingTask.updates || []),
+                                        {
+                                            id: Date.now().toString(),
+                                            type: "note",
+                                            content: action.updates.note,
+                                            timestamp: Date.now(),
+                                        },
+                                    ];
+                                }
+                            }
+                            await editTask(action.taskId, updates);
+                        }
+                        break;
+                    
+                    case "COMPLETE":
+                        if (action.taskId) {
+                            await editTask(action.taskId, { status: "done" });
+                        }
+                        break;
+                }
+            } catch (error) {
+                console.error(`Failed to execute action ${action.type}:`, error);
+            }
+        }
+    }, [addTask, editTask, tasks]);
+
+    const handleUpdateTask = async (taskId: string, updates: Partial<Task>) => {
+        await editTask(taskId, updates);
+        // Don't regenerate description on updates - it overwrites user's changes
+        // Description generation should only happen on task creation
     };
 
-    const handleDeleteTask = (taskId: string) => {
-        setTasks(tasks.filter(t => t.id !== taskId));
+    const handleDeleteTask = async (taskId: string) => {
+        await removeTask(taskId);
+        setSelectedTask(null);
     };
 
-    if (loading) {
+    if (authLoading) {
         return (
             <div className="flex min-h-screen items-center justify-center">
                 <Loader2 className="h-8 w-8 animate-spin text-white/50" />
@@ -244,15 +446,90 @@ export default function SpacePage() {
 
     return (
         <div className="mx-auto max-w-3xl">
-            <header className="mb-8 flex items-center gap-4">
-                <button
-                    onClick={() => router.back()}
-                    className="flex h-10 w-10 items-center justify-center rounded-full bg-white/5 hover:bg-white/10 text-white transition-colors"
-                >
-                    <ArrowLeft className="h-5 w-5" />
-                </button>
-                <h1 className="text-2xl font-bold text-white">{spaceName || "Loading..."}</h1>
+            <header className="mb-8 flex items-center justify-between">
+                <div className="flex items-center gap-4">
+                    <button
+                        onClick={() => router.back()}
+                        className="flex h-10 w-10 items-center justify-center rounded-full bg-white/5 hover:bg-white/10 text-white transition-colors"
+                    >
+                        <ArrowLeft className="h-5 w-5" />
+                    </button>
+                    <h1 className="text-2xl font-bold text-white">{spaceName || "Loading..."}</h1>
+                </div>
+                
+                {/* Cloud sync indicator */}
+                <div className="flex items-center gap-2 text-sm">
+                    {tasksLoading ? (
+                        <span className="flex items-center gap-1.5 text-white/40">
+                            <Loader2 className="h-4 w-4 animate-spin" />
+                            Syncing...
+                        </span>
+                    ) : tasksError ? (
+                        <span className="flex items-center gap-1.5 text-amber-400">
+                            <CloudOff className="h-4 w-4" />
+                            Offline
+                        </span>
+                    ) : (
+                        <span className="flex items-center gap-1.5 text-green-400/70">
+                            <Cloud className="h-4 w-4" />
+                            Synced
+                        </span>
+                    )}
+                </div>
             </header>
+
+            {/* Migration status banner */}
+            <AnimatePresence>
+                {isMigrating && (
+                    <motion.div
+                        initial={{ opacity: 0, y: -10 }}
+                        animate={{ opacity: 1, y: 0 }}
+                        exit={{ opacity: 0, y: -10 }}
+                        className="mb-4 rounded-lg border border-blue-500/30 bg-blue-500/10 p-3 text-sm text-blue-200"
+                    >
+                        <div className="flex items-center gap-2">
+                            <Loader2 className="h-4 w-4 animate-spin" />
+                            Migrating your tasks to the cloud...
+                        </div>
+                    </motion.div>
+                )}
+                
+                {migrationStatus && migrationStatus.success > 0 && (
+                    <motion.div
+                        initial={{ opacity: 0, y: -10 }}
+                        animate={{ opacity: 1, y: 0 }}
+                        exit={{ opacity: 0, y: -10 }}
+                        className="mb-4 rounded-lg border border-green-500/30 bg-green-500/10 p-3 text-sm text-green-200"
+                    >
+                        Successfully migrated {migrationStatus.success} task(s) to the cloud!
+                        {migrationStatus.failed > 0 && (
+                            <span className="text-amber-300"> ({migrationStatus.failed} failed)</span>
+                        )}
+                    </motion.div>
+                )}
+
+                {tasksError && (
+                    <motion.div
+                        initial={{ opacity: 0, y: -10 }}
+                        animate={{ opacity: 1, y: 0 }}
+                        exit={{ opacity: 0, y: -10 }}
+                        className="mb-4 rounded-lg border border-amber-500/30 bg-amber-500/10 p-3"
+                    >
+                        <div className="flex items-start gap-2 text-sm text-amber-200">
+                            <AlertCircle className="h-4 w-4 mt-0.5 flex-shrink-0" />
+                            <div>
+                                <p>{tasksError.message}</p>
+                                <button
+                                    onClick={clearError}
+                                    className="mt-1 text-amber-400 hover:text-amber-300"
+                                >
+                                    Dismiss
+                                </button>
+                            </div>
+                        </div>
+                    </motion.div>
+                )}
+            </AnimatePresence>
 
             <div className="mb-8 space-y-4">
                 {isProcessing && (
@@ -276,9 +553,75 @@ export default function SpacePage() {
                         </p>
                     </motion.div>
                 )}
-                <TaskInput onSubmit={handleTaskSubmit} isProcessing={isProcessing} />
+                
+                {/* Voice processing indicator */}
+                {isVoiceProcessing && (
+                    <motion.div
+                        initial={{ opacity: 0, y: -10 }}
+                        animate={{ opacity: 1, y: 0 }}
+                        className="rounded-2xl border border-indigo-500/30 bg-indigo-500/10 px-5 py-4 text-indigo-300 backdrop-blur-sm"
+                    >
+                        <div className="flex items-center gap-3">
+                            <Loader2 className="h-5 w-5 animate-spin" />
+                            <p className="text-[15px] font-medium">Processing voice log...</p>
+                        </div>
+                    </motion.div>
+                )}
+                
+                {/* Task input with voice button */}
+                <div className="flex items-center gap-3">
+                    <div className="flex-1">
+                        <TaskInput onSubmit={handleTaskSubmit} isProcessing={isProcessing} />
+                    </div>
+                    <VoiceInput
+                        onRecordingComplete={handleVoiceRecordingComplete}
+                        disabled={isProcessing || isVoiceProcessing}
+                        maxDuration={120}
+                    />
+                </div>
             </div>
+            
+            {/* Voice Preview Modal */}
+            <VoicePreviewModal
+                isOpen={voicePreviewOpen}
+                onClose={() => setVoicePreviewOpen(false)}
+                transcript={voiceTranscript}
+                actions={voiceActions}
+                onConfirm={handleVoiceActionsConfirm}
+            />
 
+            {/* Loading skeleton */}
+            {tasksLoading && tasks.length === 0 && (
+                <div className="space-y-4">
+                    {[1, 2, 3].map((i) => (
+                        <div
+                            key={i}
+                            className="glass-card animate-pulse rounded-xl p-4"
+                        >
+                            <div className="flex items-center gap-3">
+                                <div className="h-4 w-4 rounded-full bg-white/10" />
+                                <div className="h-4 w-48 rounded bg-white/10" />
+                            </div>
+                        </div>
+                    ))}
+                </div>
+            )}
+
+            {/* Empty state */}
+            {!tasksLoading && tasks.length === 0 && (
+                <motion.div
+                    initial={{ opacity: 0 }}
+                    animate={{ opacity: 1 }}
+                    className="text-center py-12"
+                >
+                    <p className="text-white/40 mb-2">No tasks yet</p>
+                    <p className="text-white/30 text-sm">
+                        Type something above to create your first task
+                    </p>
+                </motion.div>
+            )}
+
+            {/* Tasks list */}
             <div className="space-y-4">
                 {tasks.map((task) => (
                     <motion.div
@@ -309,7 +652,6 @@ export default function SpacePage() {
                 onClose={() => setSelectedTask(null)}
                 onUpdate={handleUpdateTask}
                 onDelete={handleDeleteTask}
-                onPolish={generateDescription}
             />
         </div>
     );

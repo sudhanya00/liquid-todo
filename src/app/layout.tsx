@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import { Geist, Geist_Mono } from "next/font/google";
 import "./globals.css";
 import { AuthProvider } from "@/context/AuthContext";
+import EmailVerificationBanner from "@/components/EmailVerificationBanner";
 
 const geistSans = Geist({
     variable: "--font-geist-sans",
@@ -14,8 +15,8 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-    title: "Liquid Todo",
-    description: "AI-powered task management",
+    title: "Smera - AI Work Companion",
+    description: "AI-powered work intake and memory system for solo developers",
 };
 
 export default function RootLayout({
@@ -31,6 +32,7 @@ export default function RootLayout({
             >
                 <div className="liquid-gradient-bg" />
                 <AuthProvider>
+                    <EmailVerificationBanner />
                     <main className="relative z-10 min-h-screen p-4 md:p-8">
                         {children}
                     </main>

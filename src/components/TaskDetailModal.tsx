@@ -1,6 +1,6 @@
 import { Task } from "@/types";
 import { motion, AnimatePresence } from "framer-motion";
-import { X, Check, Trash2, Calendar, Flag, AlignLeft, CheckCircle, FileText, Zap, Activity, Sparkles } from "lucide-react";
+import { X, Check, Trash2, Calendar, Flag, AlignLeft, CheckCircle, FileText, Zap, Activity, Lightbulb, Send } from "lucide-react";
 import { useState, useEffect } from "react";
 import { getRelativeTime } from "@/lib/timeUtils";
 
@@ -12,39 +12,98 @@ interface TaskDetailModalProps {
     onClose: () => void;
     onUpdate: (taskId: string, updates: Partial<Task>) => void;
     onDelete: (taskId: string) => void;
-    onPolish?: (task: Task) => Promise<void>;
 }
 
-export default function TaskDetailModal({ task, isOpen, onClose, onUpdate, onDelete, onPolish }: TaskDetailModalProps) {
+export default function TaskDetailModal({ task, isOpen, onClose, onUpdate, onDelete }: TaskDetailModalProps) {
     const [title, setTitle] = useState("");
     const [description, setDescription] = useState("");
     const [isEditingDescription, setIsEditingDescription] = useState(false);
-    const [isPolishing, setIsPolishing] = useState(false);
     const [dueDate, setDueDate] = useState("");
     const [dueTime, setDueTime] = useState("");
     const [priority, setPriority] = useState<"low" | "medium" | "high">("medium");
     const [status, setStatus] = useState<"todo" | "done">("todo");
+    const [improvementAnswer, setImprovementAnswer] = useState("");
+    const [answeringIndex, setAnsweringIndex] = useState<number | null>(null);
+    const [isSubmittingAnswer, setIsSubmittingAnswer] = useState(false);
 
     useEffect(() => {
         if (task) {
             setTitle(task.title || "");
             setDescription(task.description || "");
-            setDueDate(task.dueDate ? new Date(task.dueDate).toISOString().split('T')[0] : "");
+            // Safely parse due date - handle invalid dates
+            let parsedDate = "";
+            if (task.dueDate) {
+                try {
+                    const date = new Date(task.dueDate);
+                    if (!isNaN(date.getTime())) {
+                        parsedDate = date.toISOString().split('T')[0];
+                    }
+                } catch {
+                    parsedDate = "";
+                }
+            }
+            setDueDate(parsedDate);
             setDueTime(task.dueTime || "");
             setPriority(task.priority || "medium");
             setStatus(task.status as "todo" | "done");
         }
     }, [task]);
 
-    const handlePolish = async () => {
-        if (task && onPolish) {
-            setIsPolishing(true);
-            try {
-                await onPolish(task);
-            } finally {
-                setIsPolishing(false);
+    const handleAnswerImprovement = async (questionIndex: number) => {
+        if (!task || !improvementAnswer.trim()) return;
+        
+        setIsSubmittingAnswer(true);
+        try {
+            const question = task.suggestedImprovements?.[questionIndex];
+            
+            // Use AI to enhance the description with the new context
+            const response = await fetch("/api/enhance-description", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({
+                    taskTitle: task.title,
+                    currentDescription: description || "",
+                    question: question,
+                    answer: improvementAnswer.trim(),
+                }),
+            });
+            
+            let updatedDescription: string;
+            if (response.ok) {
+                const data = await response.json();
+                updatedDescription = data.enhancedDescription || description;
+            } else {
+                // Fallback: just append Q&A if AI fails
+                updatedDescription = (description || "") + `\n\n**${question}**\n${improvementAnswer.trim()}`;
             }
+            
+            // Remove the answered question from suggestions
+            const remainingQuestions = task.suggestedImprovements?.filter((_, i) => i !== questionIndex) || [];
+            
+            // Update the task
+            onUpdate(task.id, {
+                description: updatedDescription,
+                suggestedImprovements: remainingQuestions.length > 0 ? remainingQuestions : undefined,
+            });
+            
+            // Update local state
+            setDescription(updatedDescription);
+            setImprovementAnswer("");
+            setAnsweringIndex(null);
+        } finally {
+            setIsSubmittingAnswer(false);
         }
+    };
+
+    const handleDismissImprovement = (questionIndex: number) => {
+        if (!task) return;
+        
+        // Remove the question from suggestions
+        const remainingQuestions = task.suggestedImprovements?.filter((_, i) => i !== questionIndex) || [];
+        
+        onUpdate(task.id, {
+            suggestedImprovements: remainingQuestions.length > 0 ? remainingQuestions : undefined,
+        });
     };
 
     const handleSave = () => {
@@ -136,16 +195,6 @@ export default function TaskDetailModal({ task, isOpen, onClose, onUpdate, onDel
                                                 <span className="text-sm font-medium">Description</span>
                                             </div>
                                             <div className="flex items-center gap-2">
-                                                {onPolish && (
-                                                    <button
-                                                        onClick={handlePolish}
-                                                        disabled={isPolishing}
-                                                        className="flex items-center gap-1.5 px-2 py-1 rounded-md text-xs font-medium bg-purple-500/10 text-purple-400 hover:bg-purple-500/20 transition-colors disabled:opacity-50"
-                                                    >
-                                                        <Sparkles className={`h-3 w-3 ${isPolishing ? 'animate-spin' : ''}`} />
-                                                        {isPolishing ? 'Polishing...' : 'Polish'}
-                                                    </button>
-                                                )}
                                                 <button
                                                     onClick={() => setIsEditingDescription(!isEditingDescription)}
                                                     className="text-xs hover:text-white transition-colors uppercase tracking-wider font-medium"
@@ -251,6 +300,71 @@ export default function TaskDetailModal({ task, isOpen, onClose, onUpdate, onDel
                                                 className="w-full rounded-lg bg-white/5 px-4 py-2.5 text-sm text-white outline-none focus:ring-2 focus:ring-[var(--accent-blue)] [color-scheme:dark]"
                                             />
                                         </div>
+
+                                        {/* Suggested Improvements */}
+                                        {task.suggestedImprovements && task.suggestedImprovements.length > 0 && (
+                                            <div className="space-y-3 pt-4 border-t border-white/10">
+                                                <div className="flex items-center gap-2 text-amber-400/80">
+                                                    <Lightbulb className="h-4 w-4" />
+                                                    <span className="text-xs font-medium uppercase tracking-wider">Improve this task</span>
+                                                </div>
+                                                <div className="space-y-2">
+                                                    {task.suggestedImprovements.map((question, index) => (
+                                                        <div key={index} className="group">
+                                                            {answeringIndex === index ? (
+                                                                <div className="space-y-2 p-3 rounded-lg bg-amber-500/5 border border-amber-500/20">
+                                                                    <p className="text-xs text-amber-300">{question}</p>
+                                                                    <textarea
+                                                                        value={improvementAnswer}
+                                                                        onChange={(e) => setImprovementAnswer(e.target.value)}
+                                                                        placeholder="Type your answer..."
+                                                                        className="w-full rounded-lg bg-black/30 px-3 py-2 text-sm text-white placeholder-white/30 outline-none focus:ring-1 focus:ring-amber-500/50 resize-none"
+                                                                        rows={2}
+                                                                        autoFocus
+                                                                    />
+                                                                    <div className="flex gap-2">
+                                                                        <button
+                                                                            onClick={() => handleAnswerImprovement(index)}
+                                                                            disabled={!improvementAnswer.trim() || isSubmittingAnswer}
+                                                                            className="flex-1 flex items-center justify-center gap-1.5 px-3 py-1.5 rounded-lg bg-amber-500/20 text-amber-300 text-xs font-medium hover:bg-amber-500/30 transition-colors disabled:opacity-50"
+                                                                        >
+                                                                            <Send className="h-3 w-3" />
+                                                                            {isSubmittingAnswer ? "Adding..." : "Add to task"}
+                                                                        </button>
+                                                                        <button
+                                                                            onClick={() => {
+                                                                                setAnsweringIndex(null);
+                                                                                setImprovementAnswer("");
+                                                                            }}
+                                                                            className="px-3 py-1.5 rounded-lg text-white/40 text-xs hover:bg-white/5 transition-colors"
+                                                                        >
+                                                                            Cancel
+                                                                        </button>
+                                                                    </div>
+                                                                </div>
+                                                            ) : (
+                                                                <div 
+                                                                    className="flex items-start gap-2 p-2 rounded-lg bg-white/5 hover:bg-amber-500/10 cursor-pointer transition-colors border border-transparent hover:border-amber-500/20"
+                                                                    onClick={() => setAnsweringIndex(index)}
+                                                                >
+                                                                    <span className="text-xs text-white/60 leading-relaxed flex-1">{question}</span>
+                                                                    <button
+                                                                        onClick={(e) => {
+                                                                            e.stopPropagation();
+                                                                            handleDismissImprovement(index);
+                                                                        }}
+                                                                        className="p-1 rounded text-white/20 hover:text-white/60 hover:bg-white/10 transition-colors opacity-0 group-hover:opacity-100"
+                                                                        title="Dismiss"
+                                                                    >
+                                                                        <X className="h-3 w-3" />
+                                                                    </button>
+                                                                </div>
+                                                            )}
+                                                        </div>
+                                                    ))}
+                                                </div>
+                                            </div>
+                                        )}
                                     </div>
                                 </div>
 
