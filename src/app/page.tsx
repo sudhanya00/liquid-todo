@@ -9,6 +9,10 @@ import { motion } from "framer-motion";
 import EditSpaceModal from "@/components/EditSpaceModal";
 import { useAuth } from "@/context/AuthContext";
 import { Loader2 } from "lucide-react";
+import { FolderIcon } from "@/components/icons/CustomIcons";
+import { SpaceGridSkeleton } from "@/components/Skeleton";
+import EmptyState from "@/components/EmptyState";
+import DeleteConfirmModal from "@/components/DeleteConfirmModal";
 import { collection, query, where, onSnapshot, addDoc, deleteDoc, doc, updateDoc } from "firebase/firestore";
 import { db } from "@/lib/firebase";
 import { useEntitlements } from "@/lib/hooks/useEntitlements";
@@ -23,6 +27,7 @@ export default function Home() {
     const [isLoadingSpaces, setIsLoadingSpaces] = useState(true);
     const [showUpgradePrompt, setShowUpgradePrompt] = useState(false);
     const [upgradeMessage, setUpgradeMessage] = useState("");
+    const [deletingSpaceId, setDeletingSpaceId] = useState<string | null>(null);
 
     useEffect(() => {
         if (!loading && !user) {
@@ -91,14 +96,20 @@ export default function Home() {
         }
     };
 
-    const handleDeleteSpace = async (e: React.MouseEvent, id: string) => {
+    const handleDeleteSpace = (e: React.MouseEvent, id: string) => {
         e.stopPropagation();
-        if (!confirm("Are you sure you want to delete this space?")) return;
+        setDeletingSpaceId(id);
+    };
 
+    const confirmDeleteSpace = async () => {
+        if (!deletingSpaceId) return;
+        
         try {
-            await deleteDoc(doc(db, "spaces", id));
+            await deleteDoc(doc(db, "spaces", deletingSpaceId));
         } catch (error) {
             console.error("Error deleting space:", error);
+        } finally {
+            setDeletingSpaceId(null);
         }
     };
 
@@ -145,13 +156,26 @@ export default function Home() {
                 </div>
             </header>
 
-            <motion.div
-                initial={{ opacity: 0 }}
-                animate={{ opacity: 1 }}
-                transition={{ delay: 0.2 }}
-                className="grid grid-cols-1 gap-4 sm:grid-cols-2 md:grid-cols-3"
-            >
-                {spaces.map((space) => (
+            {isLoadingSpaces ? (
+                <SpaceGridSkeleton count={6} />
+            ) : spaces.length === 0 ? (
+                <EmptyState
+                    icon={FolderIcon}
+                    title="No spaces yet"
+                    description="Create your first space to organize your tasks and projects"
+                    action={{
+                        label: "Create Your First Space",
+                        onClick: handleCreateSpace,
+                    }}
+                />
+            ) : (
+                <motion.div
+                    initial={{ opacity: 0 }}
+                    animate={{ opacity: 1 }}
+                    transition={{ delay: 0.2 }}
+                    className="grid grid-cols-1 gap-4 sm:grid-cols-2 md:grid-cols-3"
+                >
+                    {spaces.map((space) => (
                     <SpaceCard
                         key={space.id}
                         space={space}
@@ -162,15 +186,24 @@ export default function Home() {
                             setEditingSpace(space);
                         }}
                     />
-                ))}
-                <SpaceCard isNew onClick={handleCreateSpace} />
-            </motion.div>
+                    ))}
+                    <SpaceCard isNew onClick={handleCreateSpace} />
+                </motion.div>
+            )}
 
             <EditSpaceModal
                 space={editingSpace}
                 isOpen={!!editingSpace}
                 onClose={() => setEditingSpace(null)}
                 onSave={handleUpdateSpace}
+            />
+
+            <DeleteConfirmModal
+                isOpen={!!deletingSpaceId}
+                onClose={() => setDeletingSpaceId(null)}
+                onConfirm={confirmDeleteSpace}
+                title="Delete Space?"
+                message="Are you sure you want to delete this space? All tasks within this space will be permanently removed."
             />
 
             {/* Upgrade prompt modal */}

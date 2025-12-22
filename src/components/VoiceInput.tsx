@@ -9,7 +9,8 @@
 
 import { useState, useCallback, useEffect, useRef } from "react";
 import { motion, AnimatePresence } from "framer-motion";
-import { Mic, MicOff, Square, Loader2, AlertCircle } from "lucide-react";
+import { MicOff, Square, Loader2, AlertCircle } from "lucide-react";
+import { VoiceWaveIcon } from "@/components/icons/CustomIcons";
 import {
     AudioRecorder,
     RecordingState,
@@ -238,7 +239,7 @@ export default function VoiceInput({
                 {isRecording ? (
                     <Square className="w-5 h-5 text-white relative z-10" />
                 ) : (
-                    <Mic className="w-5 h-5 text-white relative z-10" />
+                    <VoiceWaveIcon className="w-5 h-5 relative z-10" animate={recordingState.audioLevel > 0} />
                 )}
             </motion.button>
             
@@ -339,7 +340,7 @@ export function VoiceInputCompact({
             ) : isRecording ? (
                 <Square className="w-4 h-4" />
             ) : (
-                <Mic className="w-4 h-4" />
+                <VoiceWaveIcon className="w-4 h-4" animate={recordingState.audioLevel > 0} />
             )}
         </motion.button>
     );

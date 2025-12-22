@@ -19,19 +19,48 @@
     --color-glass-border: var(--glass-border);
     --color-glass-bg: var(--glass-bg);
 
-    --font-sans: var(--font-geist-sans);
-    --font-mono: var(--font-geist-mono);
+    --font-sans: var(--font-inter);
+    --font-mono: var(--font-mono);
+}
+
+* {
+    font-feature-settings: "cv11", "ss01", "ss02", "ss03", "ss04";
+    font-variant-numeric: tabular-nums;
+}
+
+/* Smooth transitions for all interactive elements */
+button, a, input, textarea, select {
+    transition-duration: 0.3s;
+    transition-timing-function: cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+/* Calm hover transitions */
+.glass-card {
+    transition: all 0.4s cubic-bezier(0.4, 0, 0.2, 1);
 }
 
 body {
     background: var(--background);
     color: var(--foreground);
-    font-family: var(--font-sans), -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
+    font-family: var(--font-inter), -apple-system, BlinkMacSystemFont, "SF Pro Display", "Segoe UI", system-ui, sans-serif;
     overflow-x: hidden;
     min-height: 100vh;
     -webkit-font-smoothing: antialiased;
     -moz-osx-font-smoothing: grayscale;
-    letter-spacing: -0.01em;
+    text-rendering: optimizeLegibility;
+    letter-spacing: -0.011em;
+    font-weight: 400;
+}
+
+h1, h2, h3, h4, h5, h6 {
+    font-weight: 700;
+    letter-spacing: -0.022em;
+    line-height: 1.2;
+}
+
+button, input, textarea, select {
+    font-family: inherit;
+    font-feature-settings: inherit;
 }
 
 /* Liquid Glass Utilities */

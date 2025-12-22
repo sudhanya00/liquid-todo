@@ -42,6 +42,14 @@ function shouldResetVoiceLogs(plan: UserPlan): boolean {
     return plan.voiceLogsResetAt < currentMonthStart;
 }
 
+/**
+ * Check if AI requests should be reset (new month)
+ */
+function shouldResetAiRequests(plan: UserPlan): boolean {
+    const currentMonthStart = getMonthStart();
+    return plan.aiRequestsResetAt < currentMonthStart;
+}
+
 // ============================================
 // User Plan CRUD
 // ============================================
@@ -56,13 +64,36 @@ export async function getUserPlan(userId: string): Promise<UserPlan> {
     if (planSnap.exists()) {
         const plan = planSnap.data() as UserPlan;
 
-        // Check if we need to reset voice logs for new month
-        if (shouldResetVoiceLogs(plan)) {
+        // Initialize missing fields (for existing users migrating to new quota system)
+        const needsInitialization = 
+            plan.aiRequestsUsed === undefined || 
+            plan.aiRequestsResetAt === undefined;
+
+        // Check if we need to reset usage for new month
+        const needsVoiceReset = plan.voiceLogsResetAt && shouldResetVoiceLogs(plan);
+        const needsAiReset = plan.aiRequestsResetAt && shouldResetAiRequests(plan);
+
+        if (needsInitialization || needsVoiceReset || needsAiReset) {
             const updatedPlan: Partial<UserPlan> = {
-                voiceLogsUsed: 0,
-                voiceLogsResetAt: getMonthStart(),
                 updatedAt: Date.now(),
             };
+            
+            // Initialize AI request fields if missing
+            if (needsInitialization) {
+                updatedPlan.aiRequestsUsed = 0;
+                updatedPlan.aiRequestsResetAt = getMonthStart();
+            }
+            
+            if (needsVoiceReset) {
+                updatedPlan.voiceLogsUsed = 0;
+                updatedPlan.voiceLogsResetAt = getMonthStart();
+            }
+            
+            if (needsAiReset) {
+                updatedPlan.aiRequestsUsed = 0;
+                updatedPlan.aiRequestsResetAt = getMonthStart();
+            }
+
             await updateDoc(planRef, updatedPlan);
             return { ...plan, ...updatedPlan } as UserPlan;
         }
@@ -76,6 +107,8 @@ export async function getUserPlan(userId: string): Promise<UserPlan> {
         tier: "free",
         voiceLogsUsed: 0,
         voiceLogsResetAt: getMonthStart(),
+        aiRequestsUsed: 0,
+        aiRequestsResetAt: getMonthStart(),
         createdAt: Date.now(),
         updatedAt: Date.now(),
     };
@@ -135,6 +168,24 @@ export async function canPerform(
                 allowed: true,
                 currentUsage: plan.voiceLogsUsed,
                 limit: limits.maxVoiceLogs,
+            };
+
+        case "create_ai_request":
+            if (limits.maxAiRequests === null) {
+                return { allowed: true };
+            }
+            if (plan.aiRequestsUsed >= limits.maxAiRequests) {
+                return {
+                    allowed: false,
+                    reason: `You've used all ${limits.maxAiRequests} AI requests this month. Upgrade to Pro for unlimited AI-powered task creation.`,
+                    currentUsage: plan.aiRequestsUsed,
+                    limit: limits.maxAiRequests,
+                };
+            }
+            return {
+                allowed: true,
+                currentUsage: plan.aiRequestsUsed,
+                limit: limits.maxAiRequests,
             };
 
         case "create_space":
@@ -209,11 +260,11 @@ export async function canCreateSpace(
 // ============================================
 
 /**
- * Increment usage for a tracked action (e.g., voice logs)
+ * Increment usage for a tracked action (e.g., voice logs, AI requests)
  */
 export async function incrementUsage(
     userId: string,
-    action: "voice_log"
+    action: "voice_log" | "ai_request"
 ): Promise<void> {
     const planRef = doc(db, "userPlans", userId);
 
@@ -221,6 +272,12 @@ export async function incrementUsage(
         case "voice_log":
             await updateDoc(planRef, {
                 voiceLogsUsed: increment(1),
+                updatedAt: Date.now(),
+            });
+            break;
+        case "ai_request":
+            await updateDoc(planRef, {
+                aiRequestsUsed: increment(1),
                 updatedAt: Date.now(),
             });
             break;
@@ -241,6 +298,10 @@ export async function getRemainingQuota(
         case "create_voice_log":
             if (limits.maxVoiceLogs === null) return null; // Unlimited
             return Math.max(0, limits.maxVoiceLogs - plan.voiceLogsUsed);
+
+        case "create_ai_request":
+            if (limits.maxAiRequests === null) return null; // Unlimited
+            return Math.max(0, limits.maxAiRequests - plan.aiRequestsUsed);
 
         default:
             return null; // Unlimited or not tracked
@@ -264,8 +325,13 @@ export async function getQuotaDisplay(
     switch (action) {
         case "create_voice_log":
             if (limits.maxVoiceLogs === null) return null;
-            const remaining = limits.maxVoiceLogs - plan.voiceLogsUsed;
-            return `${remaining}/${limits.maxVoiceLogs} voice logs remaining`;
+            const voiceRemaining = limits.maxVoiceLogs - plan.voiceLogsUsed;
+            return `${voiceRemaining}/${limits.maxVoiceLogs} voice logs remaining`;
+
+        case "create_ai_request":
+            if (limits.maxAiRequests === null) return null;
+            const aiRemaining = limits.maxAiRequests - plan.aiRequestsUsed;
+            return `${aiRemaining}/${limits.maxAiRequests} AI requests remaining`;
 
         default:
             return null;

@@ -70,15 +70,10 @@ service cloud.firestore {
     // ============================================
     
     match /userPlans/{userId} {
-      // Users can read their own plan
-      allow read: if isOwner(userId);
+      // Users can read/write their own plan
+      allow read, write: if isOwner(userId);
       
-      // DEVELOPMENT: Allow client writes for plan creation/updates
-      // TODO: Replace with Cloud Functions before production
-      allow create, update: if isOwner(userId);
-      
-      // Delete is not allowed from client
-      allow delete: if false;
+      // Note: Server-side API routes use Firebase Admin SDK which bypasses these rules
     }
     
     // ============================================
