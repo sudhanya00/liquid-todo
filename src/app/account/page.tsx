@@ -5,16 +5,13 @@ import { useAuth } from "@/context/AuthContext";
 import { useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
 import { motion } from "framer-motion";
-import { Loader2, LogOut, User, Pencil, Check, X } from "lucide-react";
-import { collection, query, where, getDocs } from "firebase/firestore";
-import { db, auth } from "@/lib/firebase";
+import { Loader2, LogOut, User, Pencil, Check, X, ArrowLeft } from "lucide-react";
+import { auth } from "@/lib/firebase";
 import { updateProfile } from "firebase/auth";
 
 export default function AccountPage() {
     const { user, loading, logout } = useAuth();
     const router = useRouter();
-    const [stats, setStats] = useState({ totalSpaces: 0, totalTasks: 0, completedTasks: 0 });
-    const [loadingStats, setLoadingStats] = useState(true);
     
     // Edit name state
     const [isEditingName, setIsEditingName] = useState(false);
@@ -27,43 +24,7 @@ export default function AccountPage() {
         }
     }, [user, loading, router]);
 
-    useEffect(() => {
-        if (!user) return;
-
-        const fetchStats = async () => {
-            try {
-                // Fetch spaces count
-                const spacesQuery = query(collection(db, "spaces"), where("ownerId", "==", user.uid));
-                const spacesSnapshot = await getDocs(spacesQuery);
-                const totalSpaces = spacesSnapshot.size;
-
-                // For tasks, we'd need to iterate through spaces or have a global tasks collection
-                // For now, we'll use localStorage as a fallback
-                let totalTasks = 0;
-                let completedTasks = 0;
-
-                spacesSnapshot.docs.forEach((spaceDoc) => {
-                    const savedTasks = localStorage.getItem(`tasks_${spaceDoc.id}`);
-                    if (savedTasks) {
-                        const tasks = JSON.parse(savedTasks);
-                        totalTasks += tasks.length;
-                        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-                        completedTasks += tasks.filter((t: any) => t.status === "done").length;
-                    }
-                });
-
-                setStats({ totalSpaces, totalTasks, completedTasks });
-            } catch (error) {
-                console.error("Error fetching stats:", error);
-            } finally {
-                setLoadingStats(false);
-            }
-        };
-
-        fetchStats();
-    }, [user]);
-
-    if (loading || loadingStats) {
+    if (loading) {
         return (
             <div className="flex min-h-screen items-center justify-center">
                 <Loader2 className="h-8 w-8 animate-spin text-white/50" />
@@ -104,21 +65,27 @@ export default function AccountPage() {
             <motion.div
                 initial={{ opacity: 0, y: 20 }}
                 animate={{ opacity: 1, y: 0 }}
+                transition={{ duration: 0.5, ease: "easeOut" }}
                 className="glass-card rounded-2xl p-8 space-y-8"
             >
                 {/* Profile Section */}
                 <div className="flex items-center gap-6">
-                    {user.photoURL ? (
-                        <img
-                            src={user.photoURL}
-                            alt={user.displayName || "User"}
-                            className="h-20 w-20 rounded-full border-2 border-white/10"
-                        />
-                    ) : (
-                        <div className="h-20 w-20 rounded-full bg-white/10 flex items-center justify-center">
-                            <User className="h-10 w-10 text-white/50" />
-                        </div>
-                    )}
+                    <motion.div
+                        whileHover={{ scale: 1.05 }}
+                        transition={{ type: "spring", stiffness: 250, damping: 20, duration: 0.3 }}
+                    >
+                        {user.photoURL ? (
+                            <img
+                                src={user.photoURL}
+                                alt={user.displayName || "User"}
+                                className="h-24 w-24 rounded-full border-2 border-white/20 shadow-lg"
+                            />
+                        ) : (
+                            <div className="h-24 w-24 rounded-full bg-gradient-to-br from-blue-500/20 to-purple-600/20 flex items-center justify-center border-2 border-white/10">
+                                <User className="h-12 w-12 text-white/50" />
+                            </div>
+                        )}
+                    </motion.div>
                     <div className="flex-1">
                         {isEditingName ? (
                             <div className="flex items-center gap-2">
@@ -126,72 +93,71 @@ export default function AccountPage() {
                                     type="text"
                                     value={editedName}
                                     onChange={(e) => setEditedName(e.target.value)}
-                                    className="bg-white/10 rounded-lg px-3 py-2 text-white text-xl font-bold focus:outline-none focus:ring-2 focus:ring-white/20"
+                                    className="bg-white/10 rounded-lg px-4 py-2.5 text-white text-xl font-bold focus:outline-none focus:ring-2 focus:ring-blue-500/50 transition-all"
                                     autoFocus
                                     disabled={savingName}
                                 />
-                                <button
+                                <motion.button
                                     onClick={handleSaveName}
                                     disabled={savingName || !editedName.trim()}
-                                    className="p-2 rounded-lg bg-green-500/20 text-green-400 hover:bg-green-500/30 disabled:opacity-50"
+                                    whileHover={{ scale: 1.05 }}
+                                    whileTap={{ scale: 0.95 }}
+                                    className="p-2.5 rounded-lg bg-green-500/20 text-green-400 hover:bg-green-500/30 disabled:opacity-50 transition-colors"
                                 >
-                                    {savingName ? <Loader2 className="h-4 w-4 animate-spin" /> : <Check className="h-4 w-4" />}
-                                </button>
-                                <button
+                                    {savingName ? <Loader2 className="h-5 w-5 animate-spin" /> : <Check className="h-5 w-5" />}
+                                </motion.button>
+                                <motion.button
                                     onClick={handleCancelEditName}
                                     disabled={savingName}
-                                    className="p-2 rounded-lg bg-red-500/20 text-red-400 hover:bg-red-500/30"
+                                    whileHover={{ scale: 1.05 }}
+                                    whileTap={{ scale: 0.95 }}
+                                    className="p-2.5 rounded-lg bg-red-500/20 text-red-400 hover:bg-red-500/30 transition-colors"
                                 >
-                                    <X className="h-4 w-4" />
-                                </button>
+                                    <X className="h-5 w-5" />
+                                </motion.button>
                             </div>
                         ) : (
                             <div className="flex items-center gap-2">
-                                <h1 className="text-2xl font-bold text-white">{user.displayName || "User"}</h1>
-                                <button
+                                <h1 className="text-3xl font-bold text-white">{user.displayName || "User"}</h1>
+                                <motion.button
                                     onClick={handleStartEditName}
-                                    className="p-1.5 rounded-lg hover:bg-white/10 text-white/50 hover:text-white transition-colors"
+                                    whileHover={{ scale: 1.1, rotate: 5 }}
+                                    whileTap={{ scale: 0.95 }}
+                                    className="p-2 rounded-lg hover:bg-white/10 text-white/40 hover:text-white transition-colors"
                                     title="Edit name"
                                 >
                                     <Pencil className="h-4 w-4" />
-                                </button>
+                                </motion.button>
                             </div>
                         )}
-                        <p className="text-white/50">{user.email}</p>
+                        <p className="text-white/60 text-lg mt-1">{user.email}</p>
                     </div>
                 </div>
 
-                {/* Stats Section */}
-                <div className="grid grid-cols-3 gap-4">
-                    <div className="bg-white/5 rounded-xl p-4 text-center">
-                        <div className="text-3xl font-bold text-white">{stats.totalSpaces}</div>
-                        <div className="text-sm text-white/50 mt-1">Spaces</div>
-                    </div>
-                    <div className="bg-white/5 rounded-xl p-4 text-center">
-                        <div className="text-3xl font-bold text-white">{stats.totalTasks}</div>
-                        <div className="text-sm text-white/50 mt-1">Total Tasks</div>
-                    </div>
-                    <div className="bg-white/5 rounded-xl p-4 text-center">
-                        <div className="text-3xl font-bold text-green-400">{stats.completedTasks}</div>
-                        <div className="text-sm text-white/50 mt-1">Completed</div>
-                    </div>
-                </div>
+                {/* Divider */}
+                <div className="border-t border-white/10" />
 
                 {/* Actions */}
                 <div className="space-y-3">
-                    <button
+                    <motion.button
                         onClick={() => router.push("/")}
-                        className="w-full px-6 py-3 rounded-xl bg-white/5 hover:bg-white/10 text-white transition-colors"
+                        whileHover={{ scale: 1.02, y: -2 }}
+                        whileTap={{ scale: 0.98 }}
+                        transition={{ duration: 0.3, ease: [0.4, 0, 0.2, 1] }}
+                        className="w-full flex items-center justify-center gap-3 px-6 py-4 rounded-xl bg-gradient-to-r from-blue-500/10 to-purple-600/10 hover:from-blue-500/20 hover:to-purple-600/20 text-white font-medium transition-all duration-300 shadow-lg shadow-blue-500/5 hover:shadow-blue-500/10"
                     >
+                        <ArrowLeft className="h-5 w-5" />
                         Back to Spaces
-                    </button>
-                    <button
+                    </motion.button>
+                    <motion.button
                         onClick={logout}
-                        className="w-full flex items-center justify-center gap-2 px-6 py-3 rounded-xl bg-red-500/10 hover:bg-red-500/20 text-red-400 transition-colors"
+                        whileHover={{ scale: 1.02, y: -2 }}
+                        whileTap={{ scale: 0.98 }}
+                        className="w-full flex items-center justify-center gap-3 px-6 py-4 rounded-xl bg-red-500/10 hover:bg-red-500/20 text-red-400 font-medium transition-all border border-red-500/20 hover:border-red-500/30"
                     >
                         <LogOut className="h-5 w-5" />
                         Logout
-                    </button>
+                    </motion.button>
                 </div>
             </motion.div>
         </div>

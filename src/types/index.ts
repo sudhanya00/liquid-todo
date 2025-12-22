@@ -6,6 +6,7 @@ export type PlanTier = "free" | "pro";
 
 export type EntitlementAction =
     | "create_voice_log"
+    | "create_ai_request"
     | "create_space"
     | "access_github_integration"
     | "access_calendar_integration"
@@ -13,6 +14,7 @@ export type EntitlementAction =
 
 export interface PlanLimits {
     maxVoiceLogs: number | null; // null = unlimited
+    maxAiRequests: number | null; // null = unlimited (text-based AI requests)
     maxSpaces: number | null; // null = unlimited
     hasGitHubIntegration: boolean;
     hasCalendarIntegration: boolean;
@@ -24,6 +26,8 @@ export interface UserPlan {
     tier: PlanTier;
     voiceLogsUsed: number;
     voiceLogsResetAt: number; // Timestamp for monthly reset
+    aiRequestsUsed: number; // Text-based AI requests (parse-task, enhance-description)
+    aiRequestsResetAt: number; // Timestamp for monthly reset
     createdAt: number;
     updatedAt: number;
 }
@@ -32,6 +36,7 @@ export interface UserPlan {
 export const PLAN_LIMITS: Record<PlanTier, PlanLimits> = {
     free: {
         maxVoiceLogs: 10,
+        maxAiRequests: 50, // 50 AI-powered text requests per month
         maxSpaces: 2,
         hasGitHubIntegration: false,
         hasCalendarIntegration: false,
@@ -39,6 +44,7 @@ export const PLAN_LIMITS: Record<PlanTier, PlanLimits> = {
     },
     pro: {
         maxVoiceLogs: null,
+        maxAiRequests: null, // Unlimited
         maxSpaces: null,
         hasGitHubIntegration: true,
         hasCalendarIntegration: true,
@@ -50,10 +56,12 @@ export const PLAN_LIMITS: Record<PlanTier, PlanLimits> = {
 // Space Types
 // ============================================
 
+export type SpaceTheme = "blue" | "purple" | "pink" | "emerald" | "amber" | "cyan" | "default";
+
 export interface Space {
     id: string;
     name: string;
-    theme: string;
+    theme: SpaceTheme;
     createdAt: number;
     ownerId: string;
 }

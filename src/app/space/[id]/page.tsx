@@ -4,10 +4,15 @@ import { useState, useEffect, useCallback } from "react";
 import { useParams, useRouter } from "next/navigation";
 import { motion, AnimatePresence } from "framer-motion";
 import { ArrowLeft, Loader2, Cloud, CloudOff, AlertCircle } from "lucide-react";
+import { PlusIcon, CheckCircleIcon } from "@/components/icons/CustomIcons";
 import TaskInput from "@/components/TaskInput";
 import TaskDetailModal from "@/components/TaskDetailModal";
 import VoiceInput from "@/components/VoiceInput";
 import VoicePreviewModal from "@/components/VoicePreviewModal";
+import AIRequestCounter from "@/components/AIRequestCounter";
+import ManualTaskModal from "@/components/ManualTaskModal";
+import { TaskListSkeleton } from "@/components/Skeleton";
+import EmptyState from "@/components/EmptyState";
 import { Task } from "@/types";
 import { useAuth } from "@/context/AuthContext";
 import { doc, getDoc } from "firebase/firestore";
@@ -17,6 +22,8 @@ import { useTasks } from "@/lib/hooks/useTasks";
 import { RecordingResult } from "@/lib/audio/recorder";
 import { blobToBase64 } from "@/lib/audio/recorder";
 import { VoiceLogAction } from "@/lib/services/speechToText";
+import { canPerform, incrementUsage } from "@/lib/entitlements";
+import { apiPost, ApiError } from "@/lib/apiClient";
 
 export default function SpacePage() {
     const params = useParams();
@@ -50,6 +57,9 @@ export default function SpacePage() {
     const [voicePreviewOpen, setVoicePreviewOpen] = useState(false);
     const [voiceTranscript, setVoiceTranscript] = useState("");
     const [voiceActions, setVoiceActions] = useState<VoiceLogAction[]>([]);
+    
+    // Manual task creation state
+    const [manualTaskModalOpen, setManualTaskModalOpen] = useState(false);
 
     useEffect(() => {
         if (!authLoading && !user) {
@@ -86,7 +96,40 @@ export default function SpacePage() {
         }
     }, [tasks, selectedTask]);
 
+    const handleManualTaskCreate = useCallback(async function(title: string) {
+        if (!user?.uid) {
+            setAiQuestion("Please sign in to create tasks.");
+            return;
+        }
+
+        const today = new Date().toISOString().split('T')[0];
+        
+        try {
+            const newTask = await addTask({
+                title: title.trim(),
+                description: "",
+                dueDate: today,
+                priority: "medium",
+                status: "todo",
+                updates: [],
+            });
+
+            if (newTask) {
+                // Open the task detail modal to let user add more details
+                setSelectedTask(newTask);
+            }
+        } catch (error) {
+            console.error("Error creating manual task:", error);
+            setAiQuestion("Failed to create task. Please try again.");
+        }
+    }, [user, addTask]);
+
     const handleTaskSubmit = async (text: string) => {
+        if (!user?.uid) {
+            setAiQuestion("Please sign in to create tasks.");
+            return;
+        }
+        
         setIsProcessing(true);
         setAiQuestion(null);
         setLoadingMessage(getLoadingMessage(text));
@@ -100,17 +143,41 @@ export default function SpacePage() {
             console.log(`[Follow-up] User answered: "${text}" for task: "${pendingTask.title}"`);
             
             try {
+                // Check AI request entitlement
+                const entitlementCheck = await canPerform(user.uid, "create_ai_request");
+                if (!entitlementCheck.allowed) {
+                    setAiQuestion(entitlementCheck.reason || "AI request limit reached.");
+                    setPendingTask(null);
+                    setContext("");
+                    setIsProcessing(false);
+                    return;
+                }
+
                 const res = await fetch("/api/parse-task", {
                     method: "POST",
                     body: JSON.stringify({ 
                         text: enrichedText, 
                         tasks,
                         spaceName,
+                        userId: user.uid,
+                        skipEntitlementCheck: true,
                     }),
                 });
                 
                 const data = await res.json();
                 console.log(`[Follow-up] API response:`, data);
+                
+                // Increment usage after successful API call
+                await incrementUsage(user.uid, "ai_request");
+                
+                // Handle quota exceeded
+                if (data.action === "quota_exceeded" || res.status === 403) {
+                    setAiQuestion(data.error || "AI request limit reached. Upgrade to Pro or create tasks manually.");
+                    setPendingTask(null);
+                    setContext("");
+                    setIsProcessing(false);
+                    return;
+                }
                 
                 // If STILL vague after user's answer, ask again (but only once more)
                 if (data.action === "clarify" && data.question && data.vaguenessScore > 60) {
@@ -179,6 +246,14 @@ export default function SpacePage() {
         };
 
         try {
+            // Check AI request entitlement before making API call
+            const entitlementCheck = await canPerform(user.uid, "create_ai_request");
+            if (!entitlementCheck.allowed) {
+                setAiQuestion(entitlementCheck.reason || "AI request limit reached. Upgrade to Pro or create tasks manually.");
+                setIsProcessing(false);
+                return;
+            }
+
             const res = await fetch("/api/parse-task", {
                 method: "POST",
                 body: JSON.stringify({ 
@@ -186,16 +261,28 @@ export default function SpacePage() {
                     tasks,
                     spaceName,
                     recentActivity,
+                    userId: user.uid,
+                    skipEntitlementCheck: true, // Already checked client-side
                 }),
             });
 
             const data = await res.json();
+
+            // Handle quota exceeded
+            if (data.action === "quota_exceeded" || res.status === 403) {
+                console.error("Quota exceeded:", data.error);
+                setAiQuestion(data.error || "AI request limit reached. Upgrade to Pro or create tasks manually.");
+                return;
+            }
 
             if (!res.ok || data.error) {
                 console.error("API Error:", data.error);
                 setAiQuestion(`Error: ${data.error || "Failed to parse task"}. Please try again.`);
                 return;
             }
+
+            // Increment usage after successful API call
+            await incrementUsage(user.uid, "ai_request");
 
             // Handle clarify action - ask combined question (context + date)
             if (data.action === "clarify" && data.question) {
@@ -249,6 +336,7 @@ export default function SpacePage() {
                                     currentDescription: existingTask.description || "",
                                     question: data.timeline?.type === "note" ? "Progress update" : "Update",
                                     answer: data.updates.description,
+                                    userId: user.uid,
                                 }),
                             });
                             if (enhanceRes.ok) {
@@ -323,9 +411,23 @@ export default function SpacePage() {
 
     // Voice log handlers
     const handleVoiceRecordingComplete = useCallback(async (result: RecordingResult) => {
+        if (!user?.uid) {
+            setAiQuestion("Please sign in to use voice logging.");
+            return;
+        }
+        
         setIsVoiceProcessing(true);
+        setAiQuestion(null);
         
         try {
+            // Check voice log entitlement
+            const entitlementCheck = await canPerform(user.uid, "create_voice_log");
+            if (!entitlementCheck.allowed) {
+                setAiQuestion(entitlementCheck.reason || "Voice log limit reached.");
+                setIsVoiceProcessing(false);
+                return;
+            }
+            
             // Convert audio blob to base64
             const audioBase64 = await blobToBase64(result.blob);
             
@@ -336,37 +438,50 @@ export default function SpacePage() {
                 status: t.status,
             }));
             
-            // Call voice-log API
-            const res = await fetch("/api/voice-log", {
-                method: "POST",
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({
+            // Call voice-log API with retry logic
+            const data = await apiPost<{
+                success: boolean;
+                transcript?: string;
+                actions?: VoiceLogAction[];
+                error?: string;
+            }>(
+                "/api/voice-log",
+                {
                     audioBase64,
                     mimeType: result.mimeType,
                     spaceId,
+                    userId: user.uid,
                     existingTasks,
-                }),
-            });
-            
-            const data = await res.json();
+                    skipEntitlementCheck: true,
+                },
+                { maxRetries: 2, timeout: 30000 }
+            );
             
             if (!data.success) {
                 setAiQuestion(data.error || "Failed to process voice log.");
                 return;
             }
             
+            // Increment usage after successful processing
+            await incrementUsage(user.uid, "voice_log");
+            
             // Show preview modal with transcript and actions
-            setVoiceTranscript(data.transcript);
+            setVoiceTranscript(data.transcript || "");
             setVoiceActions(data.actions || []);
             setVoicePreviewOpen(true);
             
         } catch (error) {
             console.error("Voice log error:", error);
-            setAiQuestion("Failed to process voice recording. Please try again.");
+            
+            if (error instanceof ApiError) {
+                setAiQuestion(error.message);
+            } else {
+                setAiQuestion("Failed to process voice recording. Please try again.");
+            }
         } finally {
             setIsVoiceProcessing(false);
         }
-    }, [tasks, spaceId]);
+    }, [tasks, spaceId, user]);
     
     const handleVoiceActionsConfirm = useCallback(async (actions: VoiceLogAction[]) => {
         for (const action of actions) {
@@ -457,8 +572,9 @@ export default function SpacePage() {
                     <h1 className="text-2xl font-bold text-white">{spaceName || "Loading..."}</h1>
                 </div>
                 
-                {/* Cloud sync indicator */}
-                <div className="flex items-center gap-2 text-sm">
+                {/* Cloud sync indicator & AI quota */}
+                <div className="flex items-center gap-3 text-sm">
+                    <AIRequestCounter />
                     {tasksLoading ? (
                         <span className="flex items-center gap-1.5 text-white/40">
                             <Loader2 className="h-4 w-4 animate-spin" />
@@ -573,6 +689,14 @@ export default function SpacePage() {
                     <div className="flex-1">
                         <TaskInput onSubmit={handleTaskSubmit} isProcessing={isProcessing} />
                     </div>
+                    <button
+                        onClick={() => setManualTaskModalOpen(true)}
+                        disabled={isProcessing}
+                        className="flex h-12 w-12 items-center justify-center rounded-full bg-gradient-to-br from-green-500 to-emerald-600 text-white shadow-lg hover:shadow-xl hover:scale-105 disabled:opacity-50 disabled:hover:scale-100 transition-all"
+                        title="Create task manually (no AI)"
+                    >
+                        <PlusIcon className="h-6 w-6" />
+                    </button>
                     <VoiceInput
                         onRecordingComplete={handleVoiceRecordingComplete}
                         disabled={isProcessing || isVoiceProcessing}
@@ -589,36 +713,30 @@ export default function SpacePage() {
                 actions={voiceActions}
                 onConfirm={handleVoiceActionsConfirm}
             />
+            
+            {/* Manual Task Creation Modal */}
+            <ManualTaskModal
+                isOpen={manualTaskModalOpen}
+                onClose={() => setManualTaskModalOpen(false)}
+                onCreate={handleManualTaskCreate}
+            />
 
             {/* Loading skeleton */}
             {tasksLoading && tasks.length === 0 && (
-                <div className="space-y-4">
-                    {[1, 2, 3].map((i) => (
-                        <div
-                            key={i}
-                            className="glass-card animate-pulse rounded-xl p-4"
-                        >
-                            <div className="flex items-center gap-3">
-                                <div className="h-4 w-4 rounded-full bg-white/10" />
-                                <div className="h-4 w-48 rounded bg-white/10" />
-                            </div>
-                        </div>
-                    ))}
-                </div>
+                <TaskListSkeleton count={4} />
             )}
 
             {/* Empty state */}
             {!tasksLoading && tasks.length === 0 && (
-                <motion.div
-                    initial={{ opacity: 0 }}
-                    animate={{ opacity: 1 }}
-                    className="text-center py-12"
-                >
-                    <p className="text-white/40 mb-2">No tasks yet</p>
-                    <p className="text-white/30 text-sm">
-                        Type something above to create your first task
-                    </p>
-                </motion.div>
+                <EmptyState
+                    icon={PlusIcon}
+                    title="No tasks yet"
+                    description="Create your first task using AI or add one manually"
+                    action={{
+                        label: "Create Manual Task",
+                        onClick: () => setManualTaskModalOpen(true),
+                    }}
+                />
             )}
 
             {/* Tasks list */}
@@ -628,19 +746,46 @@ export default function SpacePage() {
                         key={task.id}
                         initial={{ opacity: 0, y: 10 }}
                         animate={{ opacity: 1, y: 0 }}
+                        transition={{ duration: 0.4, ease: "easeOut" }}
                         onClick={() => setSelectedTask(task)}
-                        className="glass-card flex cursor-pointer items-center justify-between rounded-xl p-4 transition-transform hover:scale-[1.01]"
+                        className="glass-card relative flex cursor-pointer items-center justify-between rounded-xl p-4 overflow-hidden group"
+                        whileHover={{ 
+                            scale: 1.01,
+                            y: -2,
+                            transition: { type: "spring", stiffness: 200, damping: 30, duration: 0.5 }
+                        }}
+                        whileTap={{ scale: 0.99 }}
                     >
-                        <div className="flex items-center gap-3">
-                            <div className={`h-4 w-4 rounded-full border-2 ${task.status === 'done' ? 'bg-green-500 border-green-500' : 'border-white/30'}`} />
+                        {/* Hover gradient overlay */}
+                        <motion.div
+                            initial={{ opacity: 0 }}
+                            whileHover={{ opacity: 1 }}
+                            className="absolute inset-0 bg-gradient-to-r from-white/5 to-transparent pointer-events-none"
+                        />
+                        
+                        <div className="relative z-10 flex items-center gap-3">
+                            <motion.div
+                                whileHover={{ scale: 1.1, rotate: 5 }}
+                                transition={{ type: "spring", stiffness: 300, damping: 20, duration: 0.3 }}
+                            >
+                                {task.status === 'done' ? (
+                                    <CheckCircleIcon className="h-5 w-5" animate />
+                                ) : (
+                                    <div className="h-5 w-5 rounded-full border-2 border-white/30 group-hover:border-white/50 transition-colors" />
+                                )}
+                            </motion.div>
                             <span className={`text-white ${task.status === 'done' ? 'line-through text-gray-400' : ''}`}>
                                 {task.title}
                             </span>
                         </div>
                         {task.priority && (
-                            <span className="text-xs uppercase tracking-wider text-white/40">
+                            <motion.span 
+                                initial={{ opacity: 0.4 }}
+                                whileHover={{ opacity: 1 }}
+                                className="relative z-10 text-xs uppercase tracking-wider text-white/40"
+                            >
                                 {task.priority}
-                            </span>
+                            </motion.span>
                         )}
                     </motion.div>
                 ))}

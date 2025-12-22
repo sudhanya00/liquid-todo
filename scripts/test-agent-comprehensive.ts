@@ -6,6 +6,8 @@
 
 const BASE_URL = "http://localhost:3000";
 
+export {};
+
 interface ConversationStep {
   input: string;
   expectAction?: "create" | "update" | "clarify" | "delete";

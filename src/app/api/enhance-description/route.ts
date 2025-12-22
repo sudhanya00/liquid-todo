@@ -1,13 +1,35 @@
 import { NextResponse } from "next/server";
+import { z } from "zod";
 import { getGeminiModel } from "@/lib/gemini";
+
+// Request validation schema
+const EnhanceDescriptionRequestSchema = z.object({
+  taskTitle: z.string().min(1, "Task title is required"),
+  currentDescription: z.string().optional(),
+  question: z.string().min(1, "Question is required"),
+  answer: z.string().min(1, "Answer is required"),
+  userId: z.string().min(1, "User ID is required"),
+  skipEntitlementCheck: z.boolean().optional(),
+});
+
+// Response validation schema
+const EnhanceDescriptionResponseSchema = z.object({
+  enhancedDescription: z.string(),
+});
 
 export async function POST(req: Request) {
   try {
-    const { taskTitle, currentDescription, question, answer } = await req.json();
-
-    if (!taskTitle || !question || !answer) {
+    // Parse and validate request body
+    const body = await req.json();
+    const validatedData = EnhanceDescriptionRequestSchema.parse(body);
+    
+    const { taskTitle, currentDescription, question, answer, skipEntitlementCheck } = validatedData;
+    
+    // Client should check entitlements before calling this API
+    // This is just a safety check
+    if (!skipEntitlementCheck) {
       return NextResponse.json(
-        { error: "Missing required fields" },
+        { error: "Please check entitlements on client side before calling this API" },
         { status: 400 }
       );
     }
@@ -40,11 +62,37 @@ Rules:
 Return ONLY the enhanced description text, nothing else.`;
 
     const result = await model.generateContent([{ text: prompt }]);
-    const enhancedDescription = result.response.text()?.trim() || currentDescription;
+    const enhancedDescription = result.response.text()?.trim() || currentDescription || "";
 
-    return NextResponse.json({ enhancedDescription });
+    // Validate response
+    const response = EnhanceDescriptionResponseSchema.parse({
+      enhancedDescription,
+    });
+
+    return NextResponse.json(response);
+    
   } catch (error) {
     console.error("[Enhance-Description] Error:", error);
+    
+    // Handle Zod validation errors
+    if (error instanceof z.ZodError) {
+      return NextResponse.json(
+        { 
+          error: "Invalid request data",
+          details: error.issues 
+        },
+        { status: 400 }
+      );
+    }
+    
+    // Handle Gemini API errors
+    if (error instanceof Error && error.message.includes("API")) {
+      return NextResponse.json(
+        { error: "AI service temporarily unavailable. Please try again." },
+        { status: 503 }
+      );
+    }
+    
     return NextResponse.json(
       { error: "Failed to enhance description" },
       { status: 500 }

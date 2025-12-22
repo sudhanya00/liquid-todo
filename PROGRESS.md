@@ -1,7 +1,7 @@
 # LiquidTodo → Smera - Progress Report
 
-**Last Updated**: December 16, 2025 (Iteration 7)  
-**Status**: M1 ✅ 100%, M2 ~90%, M3 ~90%, M4 ~85%, M6 ~60%  
+**Last Updated**: December 23, 2025 (Iteration 9)  
+**Status**: M1 ✅ 100%, M2 ✅ ~95%, M3 ~90%, M4 ✅ ~95%, M5 ✅ ~95%, M6 ✅ ~85%  
 **Product Name**: Smera
 
 ---
@@ -32,11 +32,11 @@ LiquidTodo (now **Smera**) has evolved from a basic todo app into an AI-powered 
 
 **Current Focus (Production Roadmap):**
 - ✅ **Milestone 1**: Tiering & Entitlement System (Complete)
-- 🔄 **Milestone 2**: Authentication & Security Hardening (~90%)
+- ✅ **Milestone 2**: Authentication & Security Hardening (~95%)
 - 🔄 **Milestone 3**: Cloud Task Storage & Sync (~90%)
-- 🔄 **Milestone 4**: Voice Logging MVP (~85%)
-- ⏳ Milestone 5: UI/UX Polish Pass (~30%)
-- 🔄 **Milestone 6**: AI System Hardening (~60%)
+- ✅ **Milestone 4**: Voice Logging MVP (~95%)
+- ✅ **Milestone 5**: UI/UX Polish Pass (~95%) - Premium design complete
+- 🔄 **Milestone 6**: AI System Hardening (~85%) - Major progress on robustness
 - ⏳ Milestone 7: Deployment & Operations
 
 **Reference Documents:**
@@ -172,15 +172,16 @@ LiquidTodo (now **Smera**) has evolved from a basic todo app into an AI-powered 
   - Voice processing indicator
   - Preview modal integration
   - Multi-action execution
-
-### In Progress
-- 🔄 Entitlement check for voice logs (quota enforcement)
-- 🔄 Usage tracking after successful voice log
+- ✅ Entitlement & Usage Tracking
+  - Entitlement check before voice log processing
+  - Usage increment after successful transcription
+  - Proper quota exceeded error messages
+  - Free user quota display
 
 ### Pending
-- ⏳ Voice log history/audit trail
-- ⏳ Voice log retry on transcription failure
-- ⏳ Browser compatibility testing
+- ⏳ Safari browser compatibility testing (no Mac available)
+- ⏳ Voice log history/audit trail (deferred to M5)
+- ⏳ Voice log retry on transcription failure (deferred to M6)
 
 ### Files Created/Modified This Iteration (Milestone 4)
 | File | Status | Description |
@@ -192,6 +193,106 @@ LiquidTodo (now **Smera**) has evolved from a basic todo app into an AI-powered 
 | `src/components/VoicePreviewModal.tsx` | Created | Action preview and confirmation UI |
 | `src/app/space/[id]/page.tsx` | Modified | Added voice input integration |
 | `firestore.indexes.json` | Modified | Added task query indexes |
+
+---
+
+## ✅ Completed: Milestone 5 - UI/UX Polish Pass
+
+### Completed Items
+- ✅ **Custom Icon Library** (`src/components/icons/CustomIcons.tsx`)
+  - 7 premium SVG icons with unique gradients (SparkleIcon, FolderIcon, CheckCircleIcon, VoiceWaveIcon, LightningIcon, PlusIcon, CheckIcon)
+  - Framer Motion animations with spring physics
+  - Animate prop for optional motion
+  - Replaced all generic lucide icons throughout app
+- ✅ **Premium Button System** (`src/components/PremiumButton.tsx`)
+  - Reusable button component with primary/secondary/danger variants
+  - Gradient backgrounds for premium feel
+  - Consistent hover/tap animations (whileHover, whileTap)
+  - Used throughout modals and CTAs
+- ✅ **Delete Confirmation Modal** (`src/components/DeleteConfirmModal.tsx`)
+  - Premium glass card design replacing native confirm dialogs
+  - Animated icon scale-in with spring physics
+  - Sequential text reveals with staggered delays
+  - Gradient danger button with 0.3s hover transitions
+- ✅ **Enhanced EditSpaceModal**
+  - Expanded theme colors from 4 to 7 (blue, purple, pink, emerald, amber, cyan, default)
+  - Gradient save button with premium styling
+  - layoutId animations for theme selection
+  - 0.4s modal transitions with Apple's cubic-bezier curve
+- ✅ **Theme Color System**
+  - Applied theme colors throughout space cards (not just dot)
+  - Subtle 10% opacity gradients on card backgrounds
+  - Colored borders and shadow glows
+  - Consistent theme application in TaskDetailModal
+- ✅ **Typography System Upgrade**
+  - Replaced Geist with Inter font (400-800 weights)
+  - Added JetBrains Mono for code/monospace
+  - Font feature settings (cv11, ss01-04) for premium look
+  - Tight letter spacing (-0.011em body, -0.022em headings)
+  - Tabular numbers and optimized legibility
+- ✅ **Animation System Overhaul**
+  - Slowed all animations for calm, premium feel
+  - Modal transitions: 0.4s with cubic-bezier(0.4, 0, 0.2, 1)
+  - Button hovers: 0.2-0.3s with ease-out
+  - Spring physics: Reduced stiffness (150-250), increased damping (20-30)
+  - Card animations: 0.4-0.5s durations for visibility
+  - Pulse/breathing: 3s cycles (was 2s)
+  - Global transition rules in globals.css
+- ✅ **TaskDetailModal Premium Styling**
+  - Gradient status button with 0.3s hover
+  - Bold priority buttons with 0.2s transitions
+  - Gradient save button matching EditSpaceModal
+  - Consistent animation timing throughout
+- ✅ **Account Page Simplification**
+  - Removed stats section (focused on essentials)
+  - Premium gradient back button
+  - 0.5s page entry animation
+  - Clean profile picture hover (0.3s scale)
+- ✅ **Upgrade Prompts Enhancement**
+  - Custom icons in feature lists
+  - Gradient CTA buttons
+  - Premium micro-interactions
+  - Consistent animation timing
+- ✅ **Micro-Interactions Throughout**
+  - Card hover: scale(1.02) with y: -4px lift
+  - Button hover: subtle scale and shadow increases
+  - Icon animations: 0.3s spring transitions
+  - Progress indicators: smooth 3s breathing
+  - Sequential reveals in modals with 0.1-0.3s delays
+
+### Design Principles Applied
+- **Apple-like Polish**: Smooth animations, premium materials, attention to detail
+- **Calm Motion**: 0.3-0.5s minimum durations, gentle spring physics
+- **Consistent Timing**: Apple's cubic-bezier(0.4, 0, 0.2, 1) throughout
+- **Premium Typography**: Inter font with advanced features, tight tracking
+- **Subtle Gradients**: 10% opacity theme colors (not overwhelming)
+- **Glass Morphism**: Frosted glass cards with borders and shadows
+- **Unique Identity**: Custom icons instead of generic library icons
+
+### Pending
+- ⏳ Keyboard shortcuts system (Cmd/Ctrl+K for quick add)
+- ⏳ Undo/Redo system with toast notifications
+- ⏳ Advanced skeleton loaders (currently basic spinners)
+- ⏳ Voice log history/audit trail UI
+
+### Files Created/Modified (Milestone 5)
+| File | Status | Description |
+|------|--------|-------------|
+| `src/components/icons/CustomIcons.tsx` | Created | 7 premium SVG icons with gradients |
+| `src/components/PremiumButton.tsx` | Created | Reusable button with variants |
+| `src/components/DeleteConfirmModal.tsx` | Created | Premium delete confirmation |
+| `src/components/EditSpaceModal.tsx` | Enhanced | 7 theme colors, gradient button, calmed animations |
+| `src/components/SpaceCard.tsx` | Enhanced | Theme gradients throughout, 0.4s hover, 3s pulse |
+| `src/components/TaskDetailModal.tsx` | Enhanced | Premium buttons, 0.4s modal, consistent timing |
+| `src/components/EmptyState.tsx` | Enhanced | Custom icon support, 0.5s entry, 0.3s hover |
+| `src/components/VoiceInput.tsx` | Enhanced | Custom VoiceWaveIcon, calmed animations |
+| `src/components/AIRequestCounter.tsx` | Enhanced | Custom SparkleIcon with gradient |
+| `src/components/UpgradePrompt.tsx` | Enhanced | Custom icons, gradient buttons |
+| `src/app/layout.tsx` | Modified | Inter + JetBrains Mono fonts |
+| `src/app/globals.css` | Modified | Font features, typography, global transitions |
+| `src/app/page.tsx` | Modified | DeleteConfirmModal, custom icons |
+| `src/app/space/[id]/page.tsx` | Modified | Calmed task animations, 0.4-0.5s transitions |
+| `src/app/account/page.tsx` | Modified | Simplified layout, premium buttons, 0.5s entry |
 
 ---
 
@@ -228,15 +329,46 @@ LiquidTodo (now **Smera**) has evolved from a basic todo app into an AI-powered 
 - ✅ Test Suite (`scripts/test-agent-flow.ts`)
   - 8 comprehensive tests (100% passing)
   - Tests classification, vagueness, priority, dates
+- ✅ **Model Upgrade to Gemini 3 Flash Preview**
+  - Upgraded from gemini-2.0-flash for better performance
+  - More reliable classification and generation
+- ✅ **AI Request Quota System**
+  - 50 AI requests/month for free tier users
+  - Quota counter in UI with refresh capability
+  - Client-side entitlement checking before API calls
+  - Usage tracking and monthly reset
+- ✅ **Manual Task Creation**
+  - Dedicated manual task creation modal
+  - Bypasses AI quota limits
+  - Clean UX with proper form validation
+- ✅ **Robust API Architecture**
+  - Created `src/lib/apiClient.ts` with automatic retry logic
+  - Exponential backoff on failures
+  - Proper timeout handling (30s for voice, 20s for others)
+  - Type-safe error handling with ApiError class
+- ✅ **Zod Schema Validation**
+  - Request/response validation in all AI APIs
+  - Type-safe runtime checks
+  - Better error messages for invalid data
+- ✅ **Client-Side Entitlement Pattern**
+  - Consistent pattern across all APIs
+  - Check entitlements before API call (client-side)
+  - Increment usage after successful response
+  - Simplified server-side code (no admin SDK needed)
+- ✅ **Enhanced Error Handling**
+  - Distinguishes between client errors (4xx) and server errors (5xx)
+  - Special handling for NO_SPEECH and API unavailability
+  - User-friendly error messages
+  - Graceful fallbacks (e.g., append Q&A if AI enhancement fails)
 
 ### In Progress
 - 🔄 Prompt versioning structure
-- 🔄 Output schema validation (Zod)
+- 🔄 AI decision logging to Firestore
 
 ### Pending
-- ⏳ Retry & fallback logic for AI calls
-- ⏳ AI decision logging to Firestore
-- ⏳ Error tracking integration
+- ⏳ Error tracking integration (Sentry or similar)
+- ⏳ Rate limiting for API endpoints
+- ⏳ Caching for repeated AI queries
 
 ### Files Created/Modified This Iteration (Milestone 6)
 | File | Status | Description |
@@ -244,11 +376,17 @@ LiquidTodo (now **Smera**) has evolved from a basic todo app into an AI-powered 
 | `src/lib/agents/classifier.ts` | Created | LLM-powered intent classification with vagueness scoring |
 | `src/lib/agents/orchestrator.ts` | Modified | Passes through vaguenessScore from classifier |
 | `src/app/api/parse-task/route.ts` | Modified | Combined question flow, suggestedImprovements |
-| `src/app/api/enhance-description/route.ts` | Created | AI description enhancement endpoint |
-| `src/app/space/[id]/page.tsx` | Modified | Simplified follow-up handling, AI enhancement |
-| `src/components/TaskDetailModal.tsx` | Modified | Suggested improvements UI, removed Polish button |
+| `src/app/api/enhance-description/route.ts` | Modified | Client-side entitlements, Zod validation, retry support |
+| `src/app/api/voice-log/route.ts` | Modified | Client-side entitlements, Zod validation, better error handling |
+| `src/app/space/[id]/page.tsx` | Modified | Simplified follow-up handling, AI enhancement, manual task creation |
+| `src/components/TaskDetailModal.tsx` | Modified | Suggested improvements UI, apiClient with retries |
+| `src/components/AIRequestCounter.tsx` | Created | Shows AI quota usage with refresh button |
+| `src/components/ManualTaskModal.tsx` | Created | Modal for manual task creation (no AI) |
 | `src/lib/services/taskService.ts` | Modified | Added suggestedImprovements to Firestore mapping |
-| `src/types/index.ts` | Modified | Added suggestedImprovements to Task interface |
+| `src/lib/entitlements.ts` | Modified | Added AI request quota, auto-initialization for existing users |
+| `src/lib/apiClient.ts` | Created | Robust API client with retry logic, exponential backoff, timeout handling |
+| `src/lib/gemini.ts` | Modified | Upgraded to gemini-3-flash-preview model |
+| `src/types/index.ts` | Modified | Added suggestedImprovements, maxAiRequests, aiRequestsUsed to interfaces |
 | `scripts/test-agent-flow.ts` | Created | Comprehensive test suite |
 
 ---

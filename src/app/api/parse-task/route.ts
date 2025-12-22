@@ -5,10 +5,26 @@ import { Task } from "@/types";
 
 export async function POST(req: Request) {
   try {
-    const { text, tasks, spaceName, recentActivity } = await req.json();
+    const { text, tasks, spaceName, recentActivity, userId, skipEntitlementCheck } = await req.json();
 
     if (!text) {
       return NextResponse.json({ error: "Text is required" }, { status: 400 });
+    }
+
+    if (!userId) {
+      return NextResponse.json({ error: "User ID required" }, { status: 401 });
+    }
+
+    // Entitlement check should be done client-side before calling this API
+    // The skipEntitlementCheck flag is set to true when client has already verified
+    if (!skipEntitlementCheck) {
+      return NextResponse.json(
+        { 
+          error: "Entitlement check required. Please check quota before making request.",
+          action: "quota_check_required"
+        },
+        { status: 400 }
+      );
     }
 
     const currentDate = new Date().toLocaleString("en-US", {
@@ -39,6 +55,8 @@ export async function POST(req: Request) {
       taskDetails: orchestration.taskDetails,
       targetTaskId: orchestration.suggestedTaskId,
     });
+
+    // Note: Usage increment is handled client-side after successful response
 
     // 2. Handle clarify intent or low confidence
     if (orchestration.intent === "clarify") {

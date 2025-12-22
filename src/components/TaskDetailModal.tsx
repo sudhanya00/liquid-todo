@@ -3,6 +3,9 @@ import { motion, AnimatePresence } from "framer-motion";
 import { X, Check, Trash2, Calendar, Flag, AlignLeft, CheckCircle, FileText, Zap, Activity, Lightbulb, Send } from "lucide-react";
 import { useState, useEffect } from "react";
 import { getRelativeTime } from "@/lib/timeUtils";
+import { canPerform, incrementUsage } from "@/lib/entitlements";
+import { apiPost, ApiError } from "@/lib/apiClient";
+import { useAuth } from "@/context/AuthContext";
 
 import ReactMarkdown from "react-markdown";
 
@@ -12,9 +15,11 @@ interface TaskDetailModalProps {
     onClose: () => void;
     onUpdate: (taskId: string, updates: Partial<Task>) => void;
     onDelete: (taskId: string) => void;
+    userId?: string; // Required for AI enhancement
 }
 
-export default function TaskDetailModal({ task, isOpen, onClose, onUpdate, onDelete }: TaskDetailModalProps) {
+export default function TaskDetailModal({ task, isOpen, onClose, onUpdate, onDelete, userId }: TaskDetailModalProps) {
+    const { user } = useAuth();
     const [title, setTitle] = useState("");
     const [description, setDescription] = useState("");
     const [isEditingDescription, setIsEditingDescription] = useState(false);
@@ -50,38 +55,47 @@ export default function TaskDetailModal({ task, isOpen, onClose, onUpdate, onDel
     }, [task]);
 
     const handleAnswerImprovement = async (questionIndex: number) => {
-        if (!task || !improvementAnswer.trim()) return;
+        if (!task || !improvementAnswer.trim() || !user?.uid) return;
         
         setIsSubmittingAnswer(true);
         try {
             const question = task.suggestedImprovements?.[questionIndex];
             
+            // Check AI request entitlement
+            const entitlementCheck = await canPerform(user.uid, "create_ai_request");
+            if (!entitlementCheck.allowed) {
+                // Fallback: just append Q&A without AI
+                const fallbackDescription = (description || "") + `\n\n**${question}**\n${improvementAnswer.trim()}`;
+                await onUpdate(task.id, { description: fallbackDescription });
+                setImprovementAnswer("");
+                setIsSubmittingAnswer(false);
+                return;
+            }
+            
             // Use AI to enhance the description with the new context
-            const response = await fetch("/api/enhance-description", {
-                method: "POST",
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({
+            const data = await apiPost<{ enhancedDescription: string }>(
+                "/api/enhance-description",
+                {
                     taskTitle: task.title,
                     currentDescription: description || "",
                     question: question,
                     answer: improvementAnswer.trim(),
-                }),
-            });
+                    userId: user.uid,
+                    skipEntitlementCheck: true,
+                },
+                { maxRetries: 2, timeout: 20000 }
+            );
             
-            let updatedDescription: string;
-            if (response.ok) {
-                const data = await response.json();
-                updatedDescription = data.enhancedDescription || description;
-            } else {
-                // Fallback: just append Q&A if AI fails
-                updatedDescription = (description || "") + `\n\n**${question}**\n${improvementAnswer.trim()}`;
-            }
+            // Increment usage after successful API call
+            await incrementUsage(user.uid, "ai_request");
+            
+            const updatedDescription = data.enhancedDescription || description;
             
             // Remove the answered question from suggestions
             const remainingQuestions = task.suggestedImprovements?.filter((_, i) => i !== questionIndex) || [];
             
             // Update the task
-            onUpdate(task.id, {
+            await onUpdate(task.id, {
                 description: updatedDescription,
                 suggestedImprovements: remainingQuestions.length > 0 ? remainingQuestions : undefined,
             });
@@ -90,6 +104,27 @@ export default function TaskDetailModal({ task, isOpen, onClose, onUpdate, onDel
             setDescription(updatedDescription);
             setImprovementAnswer("");
             setAnsweringIndex(null);
+        } catch (error) {
+            console.error("Error answering improvement:", error);
+            
+            // Fallback: append Q&A without AI if error occurs
+            const question = task.suggestedImprovements?.[questionIndex];
+            const fallbackDescription = (description || "") + `\n\n**${question}**\n${improvementAnswer.trim()}`;
+            const remainingQuestions = task.suggestedImprovements?.filter((_, i) => i !== questionIndex) || [];
+            
+            await onUpdate(task.id, { 
+                description: fallbackDescription,
+                suggestedImprovements: remainingQuestions.length > 0 ? remainingQuestions : undefined,
+            });
+            
+            setDescription(fallbackDescription);
+            setImprovementAnswer("");
+            setAnsweringIndex(null);
+            
+            // Show error to user
+            if (error instanceof ApiError) {
+                alert(`Error: ${error.message}`);
+            }
         } finally {
             setIsSubmittingAnswer(false);
         }
@@ -151,6 +186,7 @@ export default function TaskDetailModal({ task, isOpen, onClose, onUpdate, onDel
                         initial={{ opacity: 0, scale: 0.95, y: 20 }}
                         animate={{ opacity: 1, scale: 1, y: 0 }}
                         exit={{ opacity: 0, scale: 0.95, y: 20 }}
+                        transition={{ duration: 0.4, ease: [0.4, 0, 0.2, 1] }}
                         className="fixed inset-0 z-50 flex items-center justify-center p-4"
                     >
                         <div className="w-full max-w-2xl overflow-hidden rounded-2xl bg-[#121212] border border-white/10 shadow-2xl flex flex-col max-h-[90vh]">
@@ -163,12 +199,22 @@ export default function TaskDetailModal({ task, isOpen, onClose, onUpdate, onDel
                                     </div>
                                 </div>
                                 <div className="flex items-center gap-2">
-                                    <button onClick={handleDelete} className="p-2 rounded-lg text-white/30 hover:bg-red-500/10 hover:text-red-400 transition-colors">
+                                    <motion.button 
+                                        onClick={handleDelete} 
+                                        whileHover={{ scale: 1.1, rotate: 5 }}
+                                        whileTap={{ scale: 0.95 }}
+                                        className="p-2 rounded-lg text-white/30 hover:bg-red-500/10 hover:text-red-400 transition-colors"
+                                    >
                                         <Trash2 className="h-5 w-5" />
-                                    </button>
-                                    <button onClick={onClose} className="p-2 rounded-lg text-white/50 hover:bg-white/10 hover:text-white transition-colors">
+                                    </motion.button>
+                                    <motion.button 
+                                        onClick={onClose} 
+                                        whileHover={{ scale: 1.1 }}
+                                        whileTap={{ scale: 0.95 }}
+                                        className="p-2 rounded-lg text-white/50 hover:bg-white/10 hover:text-white transition-colors"
+                                    >
                                         <X className="h-5 w-5" />
-                                    </button>
+                                    </motion.button>
                                 </div>
                             </div>
 
@@ -245,16 +291,20 @@ export default function TaskDetailModal({ task, isOpen, onClose, onUpdate, onDel
                                         {/* Status */}
                                         <div className="space-y-2">
                                             <label className="text-xs font-medium text-white/40 uppercase tracking-wider">Status</label>
-                                            <button
+                                            <motion.button
                                                 onClick={() => setStatus(status === "todo" ? "done" : "todo")}
-                                                className={`w-full flex items-center justify-center gap-2 rounded-lg px-4 py-2.5 text-sm font-medium transition-colors border border-white/5 ${status === "done"
-                                                    ? "bg-green-500/10 text-green-400 border-green-500/20"
-                                                    : "bg-white/5 text-white hover:bg-white/10"
-                                                    }`}
+                                                whileHover={{ scale: 1.02, y: -1 }}
+                                                whileTap={{ scale: 0.98 }}
+                                                transition={{ duration: 0.3, ease: "easeOut" }}
+                                                className={`w-full flex items-center justify-center gap-2 rounded-xl px-4 py-3 text-sm font-semibold transition-all ${
+                                                    status === "done"
+                                                        ? "bg-gradient-to-r from-green-500/20 to-emerald-500/20 text-green-400 border-2 border-green-500/30 shadow-lg shadow-green-500/10"
+                                                        : "bg-white/5 text-white hover:bg-white/10 border-2 border-white/10 hover:border-white/20"
+                                                }`}
                                             >
-                                                {status === "done" ? <Check className="h-4 w-4" /> : null}
+                                                {status === "done" ? <Check className="h-4 w-4" /> : <CheckCircle className="h-4 w-4" />}
                                                 {status === "done" ? "Completed" : "Mark as Done"}
-                                            </button>
+                                            </motion.button>
                                         </div>
 
                                         {/* Priority */}
@@ -262,16 +312,20 @@ export default function TaskDetailModal({ task, isOpen, onClose, onUpdate, onDel
                                             <label className="text-xs font-medium text-white/40 uppercase tracking-wider">Priority</label>
                                             <div className="flex gap-2">
                                                 {(['low', 'medium', 'high'] as const).map((p) => (
-                                                    <button
+                                                    <motion.button
                                                         key={p}
                                                         onClick={() => setPriority(p)}
-                                                        className={`flex-1 py-2 rounded-lg text-xs font-medium capitalize transition-all border border-transparent ${priority === p
-                                                            ? getPriorityColor(p) + ' border-white/10 shadow-lg'
-                                                            : 'text-white/30 hover:bg-white/5'
-                                                            }`}
+                                                        whileHover={{ scale: priority === p ? 1 : 1.05 }}
+                                                        whileTap={{ scale: 0.95 }}
+                                                        transition={{ duration: 0.2, ease: "easeOut" }}
+                                                        className={`flex-1 py-2.5 rounded-xl text-xs font-semibold capitalize transition-all border-2 ${
+                                                            priority === p
+                                                                ? getPriorityColor(p) + ' border-white/20 shadow-lg ring-2 ring-white/10'
+                                                                : 'text-white/40 hover:text-white/60 border-white/10 hover:bg-white/5 hover:border-white/20'
+                                                        }`}
                                                     >
                                                         {p}
-                                                    </button>
+                                                    </motion.button>
                                                 ))}
                                             </div>
                                         </div>
@@ -323,23 +377,27 @@ export default function TaskDetailModal({ task, isOpen, onClose, onUpdate, onDel
                                                                         autoFocus
                                                                     />
                                                                     <div className="flex gap-2">
-                                                                        <button
+                                                                        <motion.button
                                                                             onClick={() => handleAnswerImprovement(index)}
                                                                             disabled={!improvementAnswer.trim() || isSubmittingAnswer}
-                                                                            className="flex-1 flex items-center justify-center gap-1.5 px-3 py-1.5 rounded-lg bg-amber-500/20 text-amber-300 text-xs font-medium hover:bg-amber-500/30 transition-colors disabled:opacity-50"
+                                                                            whileHover={{ scale: 1.02 }}
+                                                                            whileTap={{ scale: 0.98 }}
+                                                                            className="flex-1 flex items-center justify-center gap-1.5 px-4 py-2 rounded-xl bg-gradient-to-r from-amber-500/20 to-orange-500/20 text-amber-300 text-xs font-semibold hover:from-amber-500/30 hover:to-orange-500/30 transition-all disabled:opacity-50 border border-amber-500/30"
                                                                         >
                                                                             <Send className="h-3 w-3" />
                                                                             {isSubmittingAnswer ? "Adding..." : "Add to task"}
-                                                                        </button>
-                                                                        <button
+                                                                        </motion.button>
+                                                                        <motion.button
                                                                             onClick={() => {
                                                                                 setAnsweringIndex(null);
                                                                                 setImprovementAnswer("");
                                                                             }}
-                                                                            className="px-3 py-1.5 rounded-lg text-white/40 text-xs hover:bg-white/5 transition-colors"
+                                                                            whileHover={{ scale: 1.05 }}
+                                                                            whileTap={{ scale: 0.95 }}
+                                                                            className="px-3 py-2 rounded-xl text-white/50 hover:text-white text-xs hover:bg-white/10 transition-all border border-white/10"
                                                                         >
                                                                             Cancel
-                                                                        </button>
+                                                                        </motion.button>
                                                                     </div>
                                                                 </div>
                                                             ) : (
@@ -468,18 +526,24 @@ export default function TaskDetailModal({ task, isOpen, onClose, onUpdate, onDel
                             {/* Footer */}
                             <div className="border-t border-white/10 p-6 bg-white/5">
                                 <div className="flex justify-end gap-3">
-                                    <button
+                                    <motion.button
                                         onClick={onClose}
-                                        className="px-6 py-2.5 rounded-xl text-sm font-medium text-white/60 hover:text-white hover:bg-white/5 transition-colors"
+                                        whileHover={{ scale: 1.02 }}
+                                        whileTap={{ scale: 0.98 }}
+                                        transition={{ duration: 0.2, ease: "easeOut" }}
+                                        className="px-6 py-3 rounded-xl text-sm font-medium text-white/60 hover:text-white hover:bg-white/10 transition-all duration-300 border border-white/10 hover:border-white/20"
                                     >
                                         Cancel
-                                    </button>
-                                    <button
+                                    </motion.button>
+                                    <motion.button
                                         onClick={handleSave}
-                                        className="px-8 py-2.5 rounded-xl bg-[var(--accent-blue)] text-sm font-bold text-white hover:opacity-90 shadow-lg shadow-blue-500/20 transition-all"
+                                        whileHover={{ scale: 1.02, y: -2 }}
+                                        whileTap={{ scale: 0.98 }}
+                                        transition={{ duration: 0.3, ease: [0.4, 0, 0.2, 1] }}
+                                        className="px-8 py-3 rounded-xl bg-gradient-to-r from-blue-500 to-purple-600 text-sm font-bold text-white hover:from-blue-600 hover:to-purple-700 shadow-lg shadow-blue-500/25 hover:shadow-blue-500/40 transition-all duration-300"
                                     >
                                         Save Changes
-                                    </button>
+                                    </motion.button>
                                 </div>
                             </div>
                         </div>

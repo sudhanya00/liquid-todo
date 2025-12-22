@@ -8,7 +8,8 @@
  */
 
 import { motion, AnimatePresence } from "framer-motion";
-import { Sparkles, X } from "lucide-react";
+import { X } from "lucide-react";
+import { SparkleIcon, CheckCircleIcon } from "./icons/CustomIcons";
 
 interface UpgradePromptProps {
     message: string;
@@ -28,27 +29,33 @@ export default function UpgradePrompt({
             <motion.div
                 initial={{ opacity: 0, y: -10 }}
                 animate={{ opacity: 1, y: 0 }}
-                className="flex items-start gap-3 rounded-lg border border-amber-500/30 bg-amber-500/10 p-4"
+                className="flex items-start gap-3 rounded-xl border border-amber-500/30 bg-gradient-to-r from-amber-500/10 to-orange-500/10 p-4 shadow-lg shadow-amber-500/5"
             >
-                <Sparkles className="h-5 w-5 text-amber-400 flex-shrink-0 mt-0.5" />
+                <SparkleIcon className="h-5 w-5 flex-shrink-0 mt-0.5" animate />
                 <div className="flex-1">
-                    <p className="text-sm text-amber-200">{message}</p>
+                    <p className="text-sm text-amber-200 font-medium">{message}</p>
                     {feature && (
                         <p className="mt-1 text-xs text-amber-300/70">
                             {feature} is available on the Pro plan.
                         </p>
                     )}
-                    <button className="mt-3 text-sm font-medium text-amber-400 hover:text-amber-300 transition-colors">
+                    <motion.button 
+                        whileHover={{ scale: 1.02, x: 2 }}
+                        whileTap={{ scale: 0.98 }}
+                        className="mt-3 text-sm font-semibold text-amber-400 hover:text-amber-300 transition-colors"
+                    >
                         Upgrade to Pro →
-                    </button>
+                    </motion.button>
                 </div>
                 {onDismiss && (
-                    <button
+                    <motion.button
                         onClick={onDismiss}
+                        whileHover={{ scale: 1.1 }}
+                        whileTap={{ scale: 0.9 }}
                         className="text-amber-400/50 hover:text-amber-400 transition-colors"
                     >
                         <X className="h-4 w-4" />
-                    </button>
+                    </motion.button>
                 )}
             </motion.div>
         );
@@ -63,21 +70,27 @@ export default function UpgradePrompt({
                     exit={{ opacity: 0, y: 20, scale: 0.95 }}
                     className="fixed bottom-4 right-4 z-50 max-w-sm"
                 >
-                    <div className="flex items-start gap-3 rounded-lg border border-amber-500/30 bg-zinc-900 p-4 shadow-xl">
-                        <Sparkles className="h-5 w-5 text-amber-400 flex-shrink-0 mt-0.5" />
+                    <div className="glass-card flex items-start gap-3 rounded-xl border border-amber-500/30 p-4 shadow-2xl shadow-amber-500/10">
+                        <SparkleIcon className="h-5 w-5 flex-shrink-0 mt-0.5" animate />
                         <div className="flex-1">
-                            <p className="text-sm text-white">{message}</p>
-                            <button className="mt-2 text-sm font-medium text-amber-400 hover:text-amber-300 transition-colors">
+                            <p className="text-sm text-white font-medium">{message}</p>
+                            <motion.button 
+                                whileHover={{ scale: 1.02, x: 2 }}
+                                whileTap={{ scale: 0.98 }}
+                                className="mt-2 text-sm font-semibold text-amber-400 hover:text-amber-300 transition-colors"
+                            >
                                 Upgrade to Pro →
-                            </button>
+                            </motion.button>
                         </div>
                         {onDismiss && (
-                            <button
+                            <motion.button
                                 onClick={onDismiss}
+                                whileHover={{ scale: 1.1 }}
+                                whileTap={{ scale: 0.9 }}
                                 className="text-zinc-500 hover:text-zinc-300 transition-colors"
                             >
                                 <X className="h-4 w-4" />
-                            </button>
+                            </motion.button>
                         )}
                     </div>
                 </motion.div>
@@ -103,34 +116,44 @@ export default function UpgradePrompt({
                     onClick={(e) => e.stopPropagation()}
                 >
                     <div className="flex items-center gap-3 mb-4">
-                        <div className="rounded-full bg-amber-500/20 p-2">
-                            <Sparkles className="h-6 w-6 text-amber-400" />
-                        </div>
-                        <h3 className="text-lg font-semibold text-white">
+                        <motion.div 
+                            animate={{ rotate: 360 }}
+                            transition={{ duration: 20, repeat: Infinity, ease: "linear" }}
+                            className="rounded-full bg-gradient-to-br from-amber-500/20 to-orange-500/20 p-3"
+                        >
+                            <SparkleIcon className="h-6 w-6" animate />
+                        </motion.div>
+                        <h3 className="text-xl font-bold text-white">
                             Upgrade to Pro
                         </h3>
                     </div>
 
-                    <p className="text-zinc-300 mb-6">{message}</p>
+                    <p className="text-zinc-300 mb-6 text-base">{message}</p>
 
-                    <div className="space-y-2 mb-6">
-                        <FeatureItem>Unlimited voice logs</FeatureItem>
+                    <div className="space-y-3 mb-6">
+                        <FeatureItem>Unlimited AI requests</FeatureItem>
                         <FeatureItem>Unlimited spaces</FeatureItem>
-                        <FeatureItem>GitHub integration</FeatureItem>
-                        <FeatureItem>Calendar integration</FeatureItem>
-                        <FeatureItem>Daily AI summaries</FeatureItem>
+                        <FeatureItem>Priority support</FeatureItem>
+                        <FeatureItem>Advanced analytics</FeatureItem>
+                        <FeatureItem>Early access to new features</FeatureItem>
                     </div>
 
                     <div className="flex gap-3">
-                        <button
+                        <motion.button
                             onClick={onDismiss}
-                            className="flex-1 rounded-lg border border-zinc-700 px-4 py-2 text-sm font-medium text-zinc-300 hover:bg-zinc-800 transition-colors"
+                            whileHover={{ scale: 1.02 }}
+                            whileTap={{ scale: 0.98 }}
+                            className="flex-1 rounded-xl border border-zinc-700 px-4 py-3 text-sm font-medium text-zinc-300 hover:bg-zinc-800 transition-colors"
                         >
                             Maybe later
-                        </button>
-                        <button className="flex-1 rounded-lg bg-amber-500 px-4 py-2 text-sm font-medium text-black hover:bg-amber-400 transition-colors">
+                        </motion.button>
+                        <motion.button 
+                            whileHover={{ scale: 1.02, y: -2 }}
+                            whileTap={{ scale: 0.98 }}
+                            className="flex-1 rounded-xl bg-gradient-to-r from-amber-500 to-orange-500 px-4 py-3 text-sm font-semibold text-black hover:from-amber-400 hover:to-orange-400 transition-all shadow-lg shadow-amber-500/25"
+                        >
                             Upgrade now
-                        </button>
+                        </motion.button>
                     </div>
                 </motion.div>
             </motion.div>
@@ -140,22 +163,14 @@ export default function UpgradePrompt({
 
 function FeatureItem({ children }: { children: React.ReactNode }) {
     return (
-        <div className="flex items-center gap-2 text-sm text-zinc-400">
-            <svg
-                className="h-4 w-4 text-amber-400"
-                fill="none"
-                viewBox="0 0 24 24"
-                stroke="currentColor"
-            >
-                <path
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                    strokeWidth={2}
-                    d="M5 13l4 4L19 7"
-                />
-            </svg>
+        <motion.div 
+            initial={{ opacity: 0, x: -10 }}
+            animate={{ opacity: 1, x: 0 }}
+            className="flex items-center gap-3 text-sm text-zinc-300"
+        >
+            <CheckCircleIcon className="h-5 w-5 flex-shrink-0" />
             {children}
-        </div>
+        </motion.div>
     );
 }
 

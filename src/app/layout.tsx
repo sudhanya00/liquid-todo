@@ -1,17 +1,24 @@
 import type { Metadata } from "next";
-import { Geist, Geist_Mono } from "next/font/google";
+import { Inter, JetBrains_Mono } from "next/font/google";
 import "./globals.css";
 import { AuthProvider } from "@/context/AuthContext";
 import EmailVerificationBanner from "@/components/EmailVerificationBanner";
+import ErrorBoundary from "@/components/ErrorBoundary";
 
-const geistSans = Geist({
-    variable: "--font-geist-sans",
+// Inter - Premium sans-serif font used by Apple, Notion, and many modern apps
+const inter = Inter({
+    variable: "--font-inter",
     subsets: ["latin"],
+    display: "swap",
+    weight: ["300", "400", "500", "600", "700", "800"],
 });
 
-const geistMono = Geist_Mono({
-    variable: "--font-geist-mono",
+// JetBrains Mono - Premium monospace font for code
+const jetbrainsMono = JetBrains_Mono({
+    variable: "--font-mono",
     subsets: ["latin"],
+    display: "swap",
+    weight: ["400", "500", "600", "700"],
 });
 
 export const metadata: Metadata = {
@@ -27,16 +34,18 @@ export default function RootLayout({
     return (
         <html lang="en">
             <body
-                className={`${geistSans.variable} ${geistMono.variable} antialiased min-h-screen`}
+                className={`${inter.variable} ${jetbrainsMono.variable} font-sans antialiased min-h-screen`}
                 suppressHydrationWarning
             >
                 <div className="liquid-gradient-bg" />
-                <AuthProvider>
-                    <EmailVerificationBanner />
-                    <main className="relative z-10 min-h-screen p-4 md:p-8">
-                        {children}
-                    </main>
-                </AuthProvider>
+                <ErrorBoundary>
+                    <AuthProvider>
+                        <EmailVerificationBanner />
+                        <main className="relative z-10 min-h-screen p-4 md:p-8">
+                            {children}
+                        </main>
+                    </AuthProvider>
+                </ErrorBoundary>
             </body>
         </html>
     );
