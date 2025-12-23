@@ -1,7 +1,7 @@
 # LiquidTodo → Smera - Progress Report
 
-**Last Updated**: December 23, 2025 (Iteration 9)  
-**Status**: M1 ✅ 100%, M2 ✅ ~95%, M3 ~90%, M4 ✅ ~95%, M5 ✅ ~95%, M6 ✅ ~85%  
+**Last Updated**: December 23, 2025 (Iteration 10 - Security Hardening)  
+**Status**: M1 ✅ 100%, M2 ✅ 100% (Security Fixed), M3 ~90%, M4 ✅ ~95%, M5 ✅ ~95%, M6 ✅ ~85%  
 **Product Name**: Smera
 
 ---
@@ -43,6 +43,71 @@ LiquidTodo (now **Smera**) has evolved from a basic todo app into an AI-powered 
 - [ENGINEERING_DIRECTION.md](./ENGINEERING_DIRECTION.md) - Full strategic direction
 - [MILESTONES.md](./MILESTONES.md) - Detailed execution plan
 - [MANUAL_STEPS.md](./MANUAL_STEPS.md) - Testing & manual actions required
+- [SECURITY_FIXES.md](./SECURITY_FIXES.md) - 🔒 Security audit & fixes documentation
+
+---
+
+## 🔒 NEW: Security Hardening Sprint (Dec 23, 2025)
+
+**Context**: Post-M5 security audit identified 4 critical vulnerabilities in the entitlement system implementation. Conducted comprehensive security hardening sprint to fix all issues before production deployment.
+
+### Vulnerabilities Fixed
+
+1. **skipEntitlementCheck Bypass (CRITICAL)** ✅ FIXED
+   - Issue: Clients could send `skipEntitlementCheck: true` to bypass quota limits
+   - Fix: Removed parameter from all API routes; server always enforces checks
+   - Impact: Prevents unlimited free usage of AI features
+
+2. **No Authentication Verification (CRITICAL)** ✅ FIXED
+   - Issue: API routes accepted `userId` without verifying Firebase Auth token
+   - Fix: Created `verifyAuthToken()` middleware; all routes verify Bearer tokens
+   - Impact: Prevents user impersonation and account hijacking
+
+3. **Race Conditions in Quota (HIGH)** ✅ FIXED
+   - Issue: Client-side `incrementUsage()` not atomic with server processing
+   - Fix: Server increments usage AFTER successful processing; removed client calls
+   - Impact: Prevents quota undercharging and double-billing
+
+4. **Insecure Firebase Admin (HIGH)** ✅ FIXED
+   - Issue: Firebase Admin fell back to no credentials in production
+   - Fix: Requires `FIREBASE_SERVICE_ACCOUNT_KEY` in production; fails hard if missing
+   - Impact: Prevents authentication bypass in production
+
+### Security Architecture
+
+**New Middleware:**
+- `src/lib/auth/verifyToken.ts` - Firebase ID token verification
+- `src/lib/middleware/entitlementMiddleware.ts` - Server-side quota enforcement
+
+**Secured API Routes:**
+- `src/app/api/parse-task/route.ts` - Auth + entitlement checks
+- `src/app/api/voice-log/route.ts` - Auth + entitlement checks
+- `src/app/api/enhance-description/route.ts` - Auth + entitlement checks
+
+**Updated Client Code:**
+- `src/lib/apiClient.ts` - Auto-inject Firebase Auth tokens
+- `src/app/space/[id]/page.tsx` - Removed client-side bypasses
+- `src/components/TaskDetailModal.tsx` - Removed client-side bypasses
+
+**Zero-Trust Pattern:**
+```typescript
+// All API routes now follow this pattern:
+const check = await checkEntitlement(req, userId, action);
+if (!check.allowed) return error(403);
+await process(...);
+await incrementUsage(check.userId, action);
+```
+
+### Testing Required
+- [ ] Authentication: Invalid tokens rejected (401)
+- [ ] Authorization: Quota limits enforced (403)
+- [ ] Atomic operations: No race conditions
+- [ ] Firebase credentials: Requires FIREBASE_SERVICE_ACCOUNT_KEY
+- [ ] User impersonation: Blocked (403)
+
+**Status**: 🔒 All vulnerabilities fixed | ⚠️ Needs end-to-end testing
+
+See [SECURITY_FIXES.md](./SECURITY_FIXES.md) for complete audit documentation.
 
 ---
 

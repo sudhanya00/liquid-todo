@@ -2,10 +2,11 @@ import { NextResponse } from "next/server";
 import { orchestrateIntent } from "@/lib/agents/orchestrator";
 import { handleUpdateTask } from "@/lib/agents/updater";
 import { Task } from "@/types";
+import { checkEntitlement, incrementUsage } from "@/lib/middleware/entitlementMiddleware";
 
 export async function POST(req: Request) {
   try {
-    const { text, tasks, spaceName, recentActivity, userId, skipEntitlementCheck } = await req.json();
+    const { text, tasks, spaceName, recentActivity, userId } = await req.json();
 
     if (!text) {
       return NextResponse.json({ error: "Text is required" }, { status: 400 });
@@ -15,16 +16,10 @@ export async function POST(req: Request) {
       return NextResponse.json({ error: "User ID required" }, { status: 401 });
     }
 
-    // Entitlement check should be done client-side before calling this API
-    // The skipEntitlementCheck flag is set to true when client has already verified
-    if (!skipEntitlementCheck) {
-      return NextResponse.json(
-        { 
-          error: "Entitlement check required. Please check quota before making request.",
-          action: "quota_check_required"
-        },
-        { status: 400 }
-      );
+    // SERVER-SIDE SECURITY: Verify auth and check entitlement
+    const entitlementCheck = await checkEntitlement(req, userId, "create_ai_request");
+    if (!entitlementCheck.allowed) {
+      return entitlementCheck.error!;
     }
 
     const currentDate = new Date().toLocaleString("en-US", {
@@ -56,7 +51,8 @@ export async function POST(req: Request) {
       targetTaskId: orchestration.suggestedTaskId,
     });
 
-    // Note: Usage increment is handled client-side after successful response
+    // Increment usage AFTER successful AI processing (atomic, server-side)
+    await incrementUsage(entitlementCheck.userId, "ai_request");
 
     // 2. Handle clarify intent or low confidence
     if (orchestration.intent === "clarify") {

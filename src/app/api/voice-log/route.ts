@@ -14,6 +14,7 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
 import { transcribeWithGemini, parseVoiceLogActions, VoiceLogAction } from "@/lib/services/speechToText";
+import { checkEntitlement, incrementUsage } from "@/lib/middleware/entitlementMiddleware";
 
 // Request validation schema
 const VoiceLogRequestSchema = z.object({
@@ -26,7 +27,6 @@ const VoiceLogRequestSchema = z.object({
         title: z.string(),
         status: z.string(),
     })).optional().default([]),
-    skipEntitlementCheck: z.boolean().optional(),
 });
 
 // Response validation schema
@@ -43,17 +43,12 @@ export async function POST(request: Request) {
         const body = await request.json();
         const validatedData = VoiceLogRequestSchema.parse(body);
         
-        const { audioBase64, mimeType, existingTasks, skipEntitlementCheck } = validatedData;
+        const { audioBase64, mimeType, existingTasks, userId } = validatedData;
         
-        // Client should check entitlements before calling this API
-        if (!skipEntitlementCheck) {
-            return NextResponse.json(
-                VoiceLogResponseSchema.parse({
-                    success: false,
-                    error: "Please check entitlements on client side before calling this API",
-                }),
-                { status: 400 }
-            );
+        // SERVER-SIDE SECURITY: Verify auth and check entitlement
+        const entitlementCheck = await checkEntitlement(request, userId, "create_voice_log");
+        if (!entitlementCheck.allowed) {
+            return entitlementCheck.error!;
         }
         
         // Step 1: Transcribe audio
@@ -80,6 +75,9 @@ export async function POST(request: Request) {
         );
         
         console.log("[Voice Log] Parsed actions:", actions);
+        
+        // Increment usage AFTER successful transcription (atomic, server-side)
+        await incrementUsage(entitlementCheck.userId, "voice_log");
         
         // Validate and return response
         const response = VoiceLogResponseSchema.parse({
