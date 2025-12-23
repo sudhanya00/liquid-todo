@@ -51,11 +51,11 @@ export async function POST(req: Request) {
       targetTaskId: orchestration.suggestedTaskId,
     });
 
-    // Increment usage AFTER successful AI processing (atomic, server-side)
-    await incrementUsage(entitlementCheck.userId, "ai_request");
-
     // 2. Handle clarify intent or low confidence
     if (orchestration.intent === "clarify") {
+      // Increment usage AFTER successful AI processing, before returning response
+      await incrementUsage(entitlementCheck.userId, "ai_request");
+      
       return NextResponse.json({
         action: "clarify",
         question: orchestration.clarifyingQuestion,
@@ -117,6 +117,9 @@ export async function POST(req: Request) {
           combinedQuestion = `${allQuestions.map(q => q.replace(/\?$/, '')).join(', ')}, and ${lastQ.toLowerCase()}`;
         }
         
+        // Increment usage AFTER successful AI processing, before returning response
+        await incrementUsage(entitlementCheck.userId, "ai_request");
+        
         return NextResponse.json({
           action: "clarify",
           question: combinedQuestion,
@@ -154,6 +157,9 @@ export async function POST(req: Request) {
       
       // We have due date - create the task immediately
       // Include improvement suggestions as optional enhancements user can answer later
+      // Increment usage AFTER successful AI processing, before returning response
+      await incrementUsage(entitlementCheck.userId, "ai_request");
+      
       return NextResponse.json({ 
         action: "create", 
         task: {
@@ -176,6 +182,9 @@ export async function POST(req: Request) {
         // Classifier couldn't find a matching task - this shouldn't happen
         // but if it does, fall back to create
         console.log("[Parse-Task] No target task for update, falling back to create");
+        // Increment usage AFTER successful AI processing, before returning response
+        await incrementUsage(entitlementCheck.userId, "ai_request");
+        
         return NextResponse.json({
           action: "create",
           task: { title: text },
@@ -196,6 +205,9 @@ export async function POST(req: Request) {
       if (orchestration.updates) {
         result.updates = { ...result.updates, ...orchestration.updates };
       }
+
+      // Increment usage AFTER successful AI processing, before returning response
+      await incrementUsage(entitlementCheck.userId, "ai_request");
 
       return NextResponse.json({ 
         action: "update", 
@@ -218,6 +230,9 @@ export async function POST(req: Request) {
 
       const targetTask = tasks?.find((t: Task) => t.id === targetTaskId);
 
+      // Increment usage AFTER successful AI processing, before returning response
+      await incrementUsage(entitlementCheck.userId, "ai_request");
+
       return NextResponse.json({ 
         action: "delete", 
         taskId: targetTaskId,
@@ -227,6 +242,9 @@ export async function POST(req: Request) {
       });
 
     } else if (orchestration.intent === "query") {
+      // Increment usage AFTER successful AI processing, before returning response
+      await incrementUsage(entitlementCheck.userId, "ai_request");
+      
       return NextResponse.json({
         action: "query",
         queryType: orchestration.classification.queryType,
@@ -236,6 +254,9 @@ export async function POST(req: Request) {
     }
 
     // Fallback
+    // Increment usage AFTER successful AI processing, before returning response
+    await incrementUsage(entitlementCheck.userId, "ai_request");
+    
     return NextResponse.json({
       action: "create",
       task: { title: text },
