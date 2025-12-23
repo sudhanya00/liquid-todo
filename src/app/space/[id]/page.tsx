@@ -139,7 +139,7 @@ export default function SpacePage() {
             // Enrich the task with their answer and create
             const enrichedText = `${pendingTask.title}: ${text}`;
             
-            console.log(`[Follow-up] User answered: "${text}" for task: "${pendingTask.title}"`);  
+            console.log(`[Follow-up] User answered: "${text}" for task: "${pendingTask.title}"`);
             
             try {
                 const res = await fetch("/api/parse-task", {
@@ -162,7 +162,9 @@ export default function SpacePage() {
                     setContext("");
                     setIsProcessing(false);
                     return;
-                }                // If STILL vague after user's answer, ask again (but only once more)
+                }
+
+                // If STILL vague after user's answer, ask again (but only once more)
                 if (data.action === "clarify" && data.question && data.vaguenessScore > 60) {
                     console.log(`[Follow-up] Still vague, asking again: ${data.question}`);
                     setAiQuestion(data.question);

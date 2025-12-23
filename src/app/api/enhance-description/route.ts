@@ -61,13 +61,13 @@ Return ONLY the enhanced description text, nothing else.`;
     const result = await model.generateContent([{ text: prompt }]);
     const enhancedDescription = result.response.text()?.trim() || currentDescription || "";
 
-    // Increment usage AFTER successful AI processing (atomic, server-side)
-    await incrementUsage(entitlementCheck.userId, "ai_request");
-
     // Validate response
     const response = EnhanceDescriptionResponseSchema.parse({
       enhancedDescription,
     });
+
+    // Increment usage AFTER successful validation (atomic, server-side)
+    await incrementUsage(entitlementCheck.userId, "ai_request");
 
     return NextResponse.json(response);
     
