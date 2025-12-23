@@ -12,7 +12,7 @@ Just type naturally - the AI understands what you mean:
 - "URGENT: fix the production bug" → Automatically sets high priority
 
 ### 🧠 LLM-Powered Intent Classification
-The AI uses Gemini 2.0 Flash to understand your intent:
+The AI uses Gemini 3.0 Flash to understand your intent:
 - **CREATE**: "buy groceries tomorrow" → Creates new task
 - **UPDATE**: "add note to groceries" → Updates existing task
 - **COMPLETE**: "groceries is done" → Marks task complete
