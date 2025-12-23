@@ -23,6 +23,7 @@ import { RecordingResult } from "@/lib/audio/recorder";
 import { blobToBase64 } from "@/lib/audio/recorder";
 import { VoiceLogAction } from "@/lib/services/speechToText";
 import { apiPost, ApiError } from "@/lib/apiClient";
+import { OfflineIndicator } from "@/components/OfflineIndicator";
 
 export default function SpacePage() {
     const params = useParams();
@@ -30,17 +31,20 @@ export default function SpacePage() {
     const { user, loading: authLoading } = useAuth();
     const spaceId = params.id as string;
 
-    // Use cloud-based task management
+    // Use cloud-based task management with offline support
     const {
         tasks,
         loading: tasksLoading,
         error: tasksError,
         isMigrating,
         migrationStatus,
+        isOnline,
+        pendingOperations,
         addTask,
         editTask,
         removeTask,
         clearError,
+        syncPendingOperations,
     } = useTasks({ spaceId, enableMigration: true });
 
     const [isProcessing, setIsProcessing] = useState(false);
@@ -516,6 +520,13 @@ export default function SpacePage() {
 
     return (
         <div className="mx-auto max-w-3xl">
+            {/* Offline indicator */}
+            <OfflineIndicator 
+                isOnline={isOnline}
+                pendingOperations={pendingOperations}
+                onSync={syncPendingOperations}
+            />
+            
             <header className="mb-8 flex items-center justify-between">
                 <div className="flex items-center gap-4">
                     <button
