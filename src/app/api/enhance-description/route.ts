@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
 import { getGeminiModel } from "@/lib/gemini";
+import { checkEntitlement, incrementUsage } from "@/lib/middleware/entitlementMiddleware";
 
 // Request validation schema
 const EnhanceDescriptionRequestSchema = z.object({
@@ -9,7 +10,6 @@ const EnhanceDescriptionRequestSchema = z.object({
   question: z.string().min(1, "Question is required"),
   answer: z.string().min(1, "Answer is required"),
   userId: z.string().min(1, "User ID is required"),
-  skipEntitlementCheck: z.boolean().optional(),
 });
 
 // Response validation schema
@@ -23,15 +23,12 @@ export async function POST(req: Request) {
     const body = await req.json();
     const validatedData = EnhanceDescriptionRequestSchema.parse(body);
     
-    const { taskTitle, currentDescription, question, answer, skipEntitlementCheck } = validatedData;
+    const { taskTitle, currentDescription, question, answer, userId } = validatedData;
     
-    // Client should check entitlements before calling this API
-    // This is just a safety check
-    if (!skipEntitlementCheck) {
-      return NextResponse.json(
-        { error: "Please check entitlements on client side before calling this API" },
-        { status: 400 }
-      );
+    // SERVER-SIDE SECURITY: Verify auth and check entitlement
+    const entitlementCheck = await checkEntitlement(req, userId, "create_ai_request");
+    if (!entitlementCheck.allowed) {
+      return entitlementCheck.error!;
     }
 
     const model = getGeminiModel();
@@ -63,6 +60,9 @@ Return ONLY the enhanced description text, nothing else.`;
 
     const result = await model.generateContent([{ text: prompt }]);
     const enhancedDescription = result.response.text()?.trim() || currentDescription || "";
+
+    // Increment usage AFTER successful AI processing (atomic, server-side)
+    await incrementUsage(entitlementCheck.userId, "ai_request");
 
     // Validate response
     const response = EnhanceDescriptionResponseSchema.parse({

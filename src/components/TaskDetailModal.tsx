@@ -3,7 +3,6 @@ import { motion, AnimatePresence } from "framer-motion";
 import { X, Check, Trash2, Calendar, Flag, AlignLeft, CheckCircle, FileText, Zap, Activity, Lightbulb, Send } from "lucide-react";
 import { useState, useEffect } from "react";
 import { getRelativeTime } from "@/lib/timeUtils";
-import { canPerform, incrementUsage } from "@/lib/entitlements";
 import { apiPost, ApiError } from "@/lib/apiClient";
 import { useAuth } from "@/context/AuthContext";
 
@@ -61,18 +60,8 @@ export default function TaskDetailModal({ task, isOpen, onClose, onUpdate, onDel
         try {
             const question = task.suggestedImprovements?.[questionIndex];
             
-            // Check AI request entitlement
-            const entitlementCheck = await canPerform(user.uid, "create_ai_request");
-            if (!entitlementCheck.allowed) {
-                // Fallback: just append Q&A without AI
-                const fallbackDescription = (description || "") + `\n\n**${question}**\n${improvementAnswer.trim()}`;
-                await onUpdate(task.id, { description: fallbackDescription });
-                setImprovementAnswer("");
-                setIsSubmittingAnswer(false);
-                return;
-            }
-            
             // Use AI to enhance the description with the new context
+            // Server handles authentication and quota enforcement
             const data = await apiPost<{ enhancedDescription: string }>(
                 "/api/enhance-description",
                 {
@@ -81,13 +70,9 @@ export default function TaskDetailModal({ task, isOpen, onClose, onUpdate, onDel
                     question: question,
                     answer: improvementAnswer.trim(),
                     userId: user.uid,
-                    skipEntitlementCheck: true,
                 },
                 { maxRetries: 2, timeout: 20000 }
             );
-            
-            // Increment usage after successful API call
-            await incrementUsage(user.uid, "ai_request");
             
             const updatedDescription = data.enhancedDescription || description;
             

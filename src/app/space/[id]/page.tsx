@@ -22,7 +22,6 @@ import { useTasks } from "@/lib/hooks/useTasks";
 import { RecordingResult } from "@/lib/audio/recorder";
 import { blobToBase64 } from "@/lib/audio/recorder";
 import { VoiceLogAction } from "@/lib/services/speechToText";
-import { canPerform, incrementUsage } from "@/lib/entitlements";
 import { apiPost, ApiError } from "@/lib/apiClient";
 
 export default function SpacePage() {
@@ -140,19 +139,9 @@ export default function SpacePage() {
             // Enrich the task with their answer and create
             const enrichedText = `${pendingTask.title}: ${text}`;
             
-            console.log(`[Follow-up] User answered: "${text}" for task: "${pendingTask.title}"`);
+            console.log(`[Follow-up] User answered: "${text}" for task: "${pendingTask.title}"`);  
             
             try {
-                // Check AI request entitlement
-                const entitlementCheck = await canPerform(user.uid, "create_ai_request");
-                if (!entitlementCheck.allowed) {
-                    setAiQuestion(entitlementCheck.reason || "AI request limit reached.");
-                    setPendingTask(null);
-                    setContext("");
-                    setIsProcessing(false);
-                    return;
-                }
-
                 const res = await fetch("/api/parse-task", {
                     method: "POST",
                     body: JSON.stringify({ 
@@ -160,26 +149,20 @@ export default function SpacePage() {
                         tasks,
                         spaceName,
                         userId: user.uid,
-                        skipEntitlementCheck: true,
                     }),
                 });
                 
                 const data = await res.json();
                 console.log(`[Follow-up] API response:`, data);
                 
-                // Increment usage after successful API call
-                await incrementUsage(user.uid, "ai_request");
-                
-                // Handle quota exceeded
+                // Handle quota exceeded (server-side check)
                 if (data.action === "quota_exceeded" || res.status === 403) {
                     setAiQuestion(data.error || "AI request limit reached. Upgrade to Pro or create tasks manually.");
                     setPendingTask(null);
                     setContext("");
                     setIsProcessing(false);
                     return;
-                }
-                
-                // If STILL vague after user's answer, ask again (but only once more)
+                }                // If STILL vague after user's answer, ask again (but only once more)
                 if (data.action === "clarify" && data.question && data.vaguenessScore > 60) {
                     console.log(`[Follow-up] Still vague, asking again: ${data.question}`);
                     setAiQuestion(data.question);
@@ -246,14 +229,6 @@ export default function SpacePage() {
         };
 
         try {
-            // Check AI request entitlement before making API call
-            const entitlementCheck = await canPerform(user.uid, "create_ai_request");
-            if (!entitlementCheck.allowed) {
-                setAiQuestion(entitlementCheck.reason || "AI request limit reached. Upgrade to Pro or create tasks manually.");
-                setIsProcessing(false);
-                return;
-            }
-
             const res = await fetch("/api/parse-task", {
                 method: "POST",
                 body: JSON.stringify({ 
@@ -262,27 +237,17 @@ export default function SpacePage() {
                     spaceName,
                     recentActivity,
                     userId: user.uid,
-                    skipEntitlementCheck: true, // Already checked client-side
                 }),
             });
 
             const data = await res.json();
 
-            // Handle quota exceeded
+            // Handle quota exceeded (server-side check)
             if (data.action === "quota_exceeded" || res.status === 403) {
                 console.error("Quota exceeded:", data.error);
                 setAiQuestion(data.error || "AI request limit reached. Upgrade to Pro or create tasks manually.");
                 return;
             }
-
-            if (!res.ok || data.error) {
-                console.error("API Error:", data.error);
-                setAiQuestion(`Error: ${data.error || "Failed to parse task"}. Please try again.`);
-                return;
-            }
-
-            // Increment usage after successful API call
-            await incrementUsage(user.uid, "ai_request");
 
             // Handle clarify action - ask combined question (context + date)
             if (data.action === "clarify" && data.question) {
@@ -420,14 +385,6 @@ export default function SpacePage() {
         setAiQuestion(null);
         
         try {
-            // Check voice log entitlement
-            const entitlementCheck = await canPerform(user.uid, "create_voice_log");
-            if (!entitlementCheck.allowed) {
-                setAiQuestion(entitlementCheck.reason || "Voice log limit reached.");
-                setIsVoiceProcessing(false);
-                return;
-            }
-            
             // Convert audio blob to base64
             const audioBase64 = await blobToBase64(result.blob);
             
@@ -438,7 +395,7 @@ export default function SpacePage() {
                 status: t.status,
             }));
             
-            // Call voice-log API with retry logic
+            // Call voice-log API with retry logic (auth token sent automatically)
             const data = await apiPost<{
                 success: boolean;
                 transcript?: string;
@@ -452,7 +409,6 @@ export default function SpacePage() {
                     spaceId,
                     userId: user.uid,
                     existingTasks,
-                    skipEntitlementCheck: true,
                 },
                 { maxRetries: 2, timeout: 30000 }
             );
@@ -461,9 +417,6 @@ export default function SpacePage() {
                 setAiQuestion(data.error || "Failed to process voice log.");
                 return;
             }
-            
-            // Increment usage after successful processing
-            await incrementUsage(user.uid, "voice_log");
             
             // Show preview modal with transcript and actions
             setVoiceTranscript(data.transcript || "");

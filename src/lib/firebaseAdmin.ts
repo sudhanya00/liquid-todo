@@ -2,7 +2,7 @@
  * Firebase Admin SDK for Server-Side Operations
  * 
  * This bypasses Firestore security rules and should only be used in API routes.
- * Uses service account credentials or application default credentials.
+ * PRODUCTION: Requires proper service account credentials.
  */
 
 import { initializeApp, getApps, cert, App } from "firebase-admin/app";
@@ -21,12 +21,9 @@ export function getAdminApp(): App {
         return adminApp;
     }
 
-    // Initialize with environment variables
-    // For local development: Use service account key or application default credentials
-    // For production: Use environment-based credentials
-    
+    // SECURITY: Always require proper credentials
     try {
-        // Try to initialize with service account if available
+        // Production: Use service account key from environment variable
         if (process.env.FIREBASE_SERVICE_ACCOUNT_KEY) {
             try {
                 const serviceAccount = JSON.parse(process.env.FIREBASE_SERVICE_ACCOUNT_KEY);
@@ -34,24 +31,32 @@ export function getAdminApp(): App {
                     credential: cert(serviceAccount),
                 });
                 console.log("[Firebase Admin] Initialized with service account");
+                return adminApp;
             } catch (parseError) {
                 console.error("[Firebase Admin] Failed to parse service account key:", parseError);
-                throw parseError;
+                throw new Error("Invalid FIREBASE_SERVICE_ACCOUNT_KEY format");
             }
-        } else {
-            // Use minimal config for development (no credentials needed for emulator or public access)
-            // In production, use proper credentials or Cloud Functions environment
-            console.log("[Firebase Admin] Initializing with project ID only (development mode)");
+        }
+        
+        // Development: Allow fallback ONLY in development mode
+        if (process.env.NODE_ENV === "development") {
+            console.warn("[Firebase Admin] WARNING: Running without credentials in development mode");
+            console.warn("[Firebase Admin] This will NOT work in production!");
             adminApp = initializeApp({
                 projectId: process.env.NEXT_PUBLIC_FIREBASE_PROJECT_ID,
             });
+            return adminApp;
         }
         
-        console.log("[Firebase Admin] Initialized successfully");
-        return adminApp;
+        // Production without credentials = FAIL
+        throw new Error(
+            "FIREBASE_SERVICE_ACCOUNT_KEY is required in production. " +
+            "Set this environment variable with your Firebase service account JSON."
+        );
+        
     } catch (error) {
         console.error("[Firebase Admin] Initialization error:", error);
-        throw new Error("Failed to initialize Firebase Admin SDK");
+        throw error;
     }
 }
 

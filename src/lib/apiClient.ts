@@ -1,17 +1,21 @@
 /**
- * API Client with Retry Logic and Error Handling
+ * API Client with Retry Logic, Error Handling, and Authentication
  * 
  * Provides robust API calling with:
+ * - Automatic Firebase Auth token injection
  * - Automatic retries on failure
  * - Exponential backoff
  * - Proper error messages
  * - Type-safe responses
  */
 
+import { auth } from "@/lib/firebase";
+
 export interface ApiCallOptions {
     maxRetries?: number;
     retryDelay?: number;
     timeout?: number;
+    skipAuth?: boolean; // For public endpoints only
 }
 
 export class ApiError extends Error {
@@ -26,6 +30,23 @@ export class ApiError extends Error {
 }
 
 /**
+ * Get Firebase Auth token for authenticated requests
+ */
+async function getAuthToken(): Promise<string | null> {
+    const user = auth.currentUser;
+    if (!user) {
+        return null;
+    }
+    
+    try {
+        return await user.getIdToken();
+    } catch (error) {
+        console.error("[API Client] Failed to get auth token:", error);
+        return null;
+    }
+}
+
+/**
  * Sleep helper for retry delays
  */
 function sleep(ms: number): Promise<void> {
@@ -33,7 +54,7 @@ function sleep(ms: number): Promise<void> {
 }
 
 /**
- * Make an API call with retry logic
+ * Make an API call with retry logic and automatic auth
  */
 export async function apiCall<T>(
     url: string,
@@ -44,9 +65,19 @@ export async function apiCall<T>(
         maxRetries = 3,
         retryDelay = 1000,
         timeout = 30000,
+        skipAuth = false,
     } = config;
 
     let lastError: Error | null = null;
+
+    // Get auth token if not skipping auth
+    let authToken: string | null = null;
+    if (!skipAuth) {
+        authToken = await getAuthToken();
+        if (!authToken) {
+            throw new ApiError("Authentication required. Please sign in.", 401);
+        }
+    }
 
     for (let attempt = 0; attempt <= maxRetries; attempt++) {
         try {
@@ -54,8 +85,15 @@ export async function apiCall<T>(
             const controller = new AbortController();
             const timeoutId = setTimeout(() => controller.abort(), timeout);
 
+            // Add auth header if we have a token
+            const headers = new Headers(options.headers);
+            if (authToken) {
+                headers.set('Authorization', `Bearer ${authToken}`);
+            }
+
             const response = await fetch(url, {
                 ...options,
+                headers,
                 signal: controller.signal,
             });
 
