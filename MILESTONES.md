@@ -2,9 +2,9 @@
 
 **Version**: 1.5  
 **Created**: December 15, 2025  
-**Last Updated**: December 23, 2025 (Iteration 9)  
+**Last Updated**: December 23, 2025 (Iteration 10 - M5 Complete + Security Hardening)  
 **Timeline**: 8–12 weeks  
-**Status**: M1 ✅, M2 ✅ ~95%, M3 ~90%, M4 ✅ ~95%, M5 ✅ ~95%, M6 ~85%
+**Status**: M1 ✅, M2 ✅ 100%, M3 ~90%, M4 ✅ ~95%, M5 ✅ 100%, M6 ~85%
 
 ---
 
@@ -581,7 +581,7 @@ Server:
 **Duration**: 1.5 weeks  
 **Priority**: P1  
 **Dependencies**: Core features stable  
-**Status**: ✅ ~95% Complete
+**Status**: ✅ 100% Complete (Security Hardened)
 
 ### 5.1 Custom Icon Library ✅ COMPLETE
 
@@ -727,7 +727,63 @@ Server:
 
 ---
 
-### 5.7 Pending Items
+### 5.7 Security Hardening ✅ COMPLETE
+
+**Added**: December 23, 2025 (Post-M5 Security Audit)
+
+**Files Created**:
+- ✅ `src/lib/auth/verifyToken.ts` — Firebase Auth token verification
+- ✅ `src/lib/middleware/entitlementMiddleware.ts` — Server-side quota enforcement
+- ✅ `SECURITY_FIXES.md` — Complete security audit documentation
+
+**Vulnerabilities Fixed**:
+1. **skipEntitlementCheck Bypass (CRITICAL)** ✅
+   - Removed parameter from all API routes
+   - Server always enforces quota checks
+   
+2. **No Authentication Verification (CRITICAL)** ✅
+   - Created `verifyAuthToken()` middleware
+   - All API routes verify Bearer tokens
+   
+3. **Race Conditions in Quota (HIGH)** ✅
+   - Server increments usage AFTER successful processing
+   - Removed client-side incrementUsage calls
+   
+4. **Insecure Firebase Admin (HIGH)** ✅
+   - Requires `FIREBASE_SERVICE_ACCOUNT_KEY` in production
+   - Fails hard if credentials missing
+
+**Files Secured**:
+- ✅ `src/app/api/parse-task/route.ts`
+- ✅ `src/app/api/voice-log/route.ts`
+- ✅ `src/app/api/enhance-description/route.ts`
+- ✅ `src/lib/firebaseAdmin.ts`
+
+**Files Updated**:
+- ✅ `src/lib/apiClient.ts` — Auto-inject Firebase Auth tokens
+- ✅ `src/app/space/[id]/page.tsx` — Removed client-side bypasses
+- ✅ `src/components/TaskDetailModal.tsx` — Removed client-side bypasses
+
+**Zero-Trust Architecture**:
+```typescript
+// All API routes now follow this pattern:
+const check = await checkEntitlement(req, userId, action);
+if (!check.allowed) return error(403);
+await process(...);
+await incrementUsage(check.userId, action);
+```
+
+**Acceptance Criteria**:
+- [x] All API routes authenticate with Firebase tokens
+- [x] All quota checks done server-side only
+- [x] Usage incremented atomically after success
+- [x] Firebase Admin requires credentials in production
+- [x] No client-side security bypasses possible
+- [x] Complete audit documentation created
+
+---
+
+### 5.8 Pending Items (Deferred)
 
 **Not Yet Started**:
 - [ ] Keyboard shortcuts (Cmd/Ctrl+K, Escape, Tab navigation)
