@@ -86,7 +86,7 @@ export default function EditSpaceModal({ space, isOpen, onClose, onSave }: EditS
                                         {THEMES.map((t) => (
                                             <motion.button
                                                 key={t.id}
-                                                onClick={() => setTheme(t.id)}
+                                                onClick={() => setTheme(t.id as SpaceTheme)}
                                                 whileHover={{ scale: 1.15 }}
                                                 whileTap={{ scale: 0.95 }}
                                                 transition={{ duration: 0.2, ease: "easeOut" }}

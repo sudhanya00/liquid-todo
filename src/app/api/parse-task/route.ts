@@ -3,6 +3,7 @@ import { orchestrateIntent } from "@/lib/agents/orchestrator";
 import { handleUpdateTask } from "@/lib/agents/updater";
 import { Task } from "@/types";
 import { checkEntitlement, incrementUsage } from "@/lib/middleware/entitlementMiddleware";
+import { AIError, getUserFriendlyErrorMessage } from "@/lib/aiRetry";
 
 export async function POST(req: Request) {
   try {
@@ -266,6 +267,24 @@ export async function POST(req: Request) {
 
   } catch (error) {
     console.error("[Parse-Task] Error:", error);
-    return NextResponse.json({ error: "Failed to parse task" }, { status: 500 });
+    
+    // Handle AIError with user-friendly messages
+    if (error instanceof AIError) {
+      const message = getUserFriendlyErrorMessage(error);
+      const statusCode = error.type === "INVALID_API_KEY" ? 500 : 503;
+      
+      return NextResponse.json({ 
+        error: message,
+        action: "error",
+        retryable: error.retryable,
+      }, { status: statusCode });
+    }
+    
+    // Generic error fallback
+    return NextResponse.json({ 
+      error: "Failed to parse task. Please try again.",
+      action: "error",
+      retryable: true,
+    }, { status: 500 });
   }
 }

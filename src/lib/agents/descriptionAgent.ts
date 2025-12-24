@@ -1,5 +1,6 @@
 import { getGeminiModel } from "@/lib/gemini";
 import { Task } from "@/types";
+import { retryWithBackoff, AIError, getUserFriendlyErrorMessage } from "@/lib/aiRetry";
 
 export async function generatePolishedDescription(task: Task): Promise<string> {
     const hasActivity = task.updates && task.updates.length > 0;
@@ -51,8 +52,36 @@ Example:
 - Title: "Fix login bug" → "Investigate and resolve the authentication issue preventing users from logging in."
 - Title: "Review PR #42" → "Review and approve the pull request for the new feature."`;
 
-    const model = getGeminiModel();
-    const result = await model.generateContent(prompt);
-    const response = result.response;
-    return response.text();
+    try {
+        return await retryWithBackoff<string>(
+            async () => {
+                const model = getGeminiModel();
+                const result = await model.generateContent(prompt);
+                const response = result.response;
+                const text = response.text();
+                
+                if (!text || text.trim().length === 0) {
+                    throw new Error("Empty response from AI");
+                }
+                
+                return text;
+            },
+            {
+                maxRetries: 2,
+                initialDelayMs: 1000,
+                timeoutMs: 20000, // 20 seconds
+            },
+            "Description Generation"
+        );
+    } catch (error) {
+        console.error("[Description Agent] Error:", error);
+        
+        if (error instanceof AIError) {
+            console.error("[Description Agent] AI Error:", getUserFriendlyErrorMessage(error));
+        }
+        
+        // Return a simple fallback description
+        return `Task: ${task.title}`;
+    }
 }
+

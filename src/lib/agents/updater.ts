@@ -1,5 +1,6 @@
 import { getGeminiModel } from "@/lib/gemini";
 import { Task, TaskUpdate } from "@/types";
+import { retryWithBackoff, parseAIResponse, AIError, getUserFriendlyErrorMessage } from "@/lib/aiRetry";
 
 interface UpdaterResponse {
     taskId: string | null;
@@ -43,42 +44,85 @@ export async function handleUpdateTask(
         ? tasks.map((t, idx) => `${idx + 1}. [ID: ${t.id}] "${t.title}"${t.description ? ` - ${t.description.substring(0, 80)}` : ''} [Status: ${t.status}]`).join('\n')
         : "No existing tasks.";
 
-    const SYSTEM_PROMPT = `
-    You are the Updater Agent for an AI-powered Todo App.
-    Your job is to generate structured updates + timeline entries for the specified task.
+    const SYSTEM_PROMPT = `You are an expert Task Update Agent for an AI-powered task management system.
 
-    CONTEXT:
-    1. Current Date: ${currentDate}
-    2. ALL Existing Tasks:
-    ${tasksContext}
-    3. TARGET TASK TO UPDATE: [ID: ${targetTask.id}] "${targetTask.title}" [Status: ${targetTask.status}]
+## CONTEXT
+**Current Date:** ${currentDate}
 
-    RUBRIC:
-    1. **Task Already Identified**: 
-       - The target task has been identified by our smart classifier
-       - Focus on determining WHAT updates to make
+**All Tasks in Space:**
+${tasksContext}
+
+**TARGET TASK (To Update):**
+- ID: ${targetTask.id}
+- Title: "${targetTask.title}"
+- Status: ${targetTask.status}
+
+## YOUR OBJECTIVE
+Analyze the user's update request and generate:
+1. Structured field updates (only fields that should change)
+2. Timeline entry documenting the change
+
+## RULES (Critical - Follow Exactly)
     
-    2. **Determine Updates**:
-       **CRITICAL STATUS LOGIC:**
-       - **ONLY mark status="done" if user EXPLICITLY says the ENTIRE TASK is done**
-       - Examples that should mark as done:
-         * "agent 1 is done"
-         * "finished the agent 1 task"
-         * "completed agent 1"
-       - Examples that should NOT mark as done (these are progress notes):
-         * "completed the embedding model setup" → This is a NOTE, not task completion
-         * "completed DAX translation code" → This is a NOTE
-         * "finished the database configuration" → This is a NOTE
-         * "established connection" → This is a NOTE
+### 1. STATUS UPDATES (Most Critical)
+
+**ONLY set status="done" when user explicitly says the ENTIRE task is complete.**
+
+**Phrases indicating task completion:**
+- "[task name] is done/finished/complete"
+- "I finished [task name]"
+- "Wrapped up [task name]"
+- "[task name] is complete"
+- "Mark [task name] as done"
+
+**Examples - Mark as DONE:**
+- "The API integration is done" → status: "done"
+- "Finished the login bug fix" → status: "done"
+- "PR review complete" → status: "done"
+
+**Examples - DO NOT mark as done (Progress Notes):**
+- "Completed the database schema" → NOTE (part of larger task)
+- "Finished setting up environment" → NOTE (subtask)
+- "Done with initial testing" → NOTE (phase of task)
+- "Wrapped up the meeting" → NOTE (activity, not task)
+
+**Critical distinction:**
+- User refers to THE TASK by name + completion word → status: "done"
+- User describes work completed (subtask/milestone) → Timeline NOTE only
+
+**Status change to "in-progress":**
+- "Started working on [task]"
+- "Beginning [task]"
+- "[task] is in progress"
+
+**Status change to "todo":**
+- "Reopen [task]"
+- "Need to redo [task]"
+- "Moving [task] back to todo"
        
-       **Other Updates:**
-       - **Due Date/Time**: Only update if user explicitly mentions changing the date/time
-       - **Priority**: Only update if user mentions priority ("make it high priority")
-       - **Description**: Only update if user EXPLICITLY asks to change the description. Do NOT put progress notes here.
-       
-       **IMPORTANT**: Only include fields in "updates" that should actually be changed.
-       - If user is just adding a note, do NOT return description. Just return the timeline entry.
-       - Do NOT return null/undefined for fields that shouldn't change
+### 2. OTHER FIELD UPDATES
+
+**Priority (only if explicitly mentioned):**
+- "Make [task] high/urgent priority" → priority: "high"
+- "Lower priority of [task]" → priority: "low"
+- "Set [task] to medium priority" → priority: "medium"
+- "This is urgent/critical/ASAP" → priority: "high"
+
+**Due Date (only if explicitly mentioned):**
+- "Move [task] to tomorrow" → dueDate: [tomorrow's date]
+- "Change deadline to Friday" → dueDate: [Friday's date]
+- "Extend [task] by 2 days" → dueDate: [current + 2 days]
+- "No deadline" → dueDate: null
+
+**Description (RARELY updated):**
+- Only when user says "change/update the description"
+- Progress notes → Timeline entry, NOT description update
+- New details → Add to description if requested
+
+**CRITICAL RULE:** Only include fields in "updates" object that should ACTUALLY change.
+- If just adding a note → Only timeline entry, empty updates: {}
+- If marking complete → updates: { status: "done" }
+- If no changes → updates: {}, timeline with clarification
     
     3. **Generate Timeline Entry**:
        - **type**: "status_change" | "note" | "field_update"
@@ -123,31 +167,60 @@ export async function handleUpdateTask(
     }
     `;
 
-    const model = getGeminiModel();
-    const result = await model.generateContent([
-        { text: SYSTEM_PROMPT },
-        { text: `User Input: "${text}"` }
-    ]);
-
-    const response = result.response;
-    let jsonStr = response.text();
-    jsonStr = jsonStr.replace(/```json/g, "").replace(/```/g, "").trim();
-
     try {
-        const parsed = JSON.parse(jsonStr);
+        // Use retry logic with timeout protection
+        const parsed = await retryWithBackoff<UpdaterResponse>(
+            async () => {
+                const model = getGeminiModel();
+                const result = await model.generateContent([
+                    { text: SYSTEM_PROMPT },
+                    { text: `User Input: "${text}"` }
+                ]);
 
-        // If we have a target task from fuzzy matching, use it
-        if (targetTask && !parsed.taskId) {
-            parsed.taskId = targetTask.id;
-        }
-
+                const response = result.response;
+                const jsonStr = response.text();
+                
+                console.log("[Updater] Raw response:", jsonStr.substring(0, 200) + "...");
+                
+                // Parse with fallback
+                const fallback: UpdaterResponse = {
+                    taskId: targetTask?.id || null,
+                    updates: {},
+                    missingInfo: "I couldn't process the update request. Please try again.",
+                };
+                
+                const result_parsed = parseAIResponse<UpdaterResponse>(jsonStr, fallback);
+                
+                // If we have a target task from classifier, use it
+                if (targetTask && !result_parsed.taskId) {
+                    result_parsed.taskId = targetTask.id;
+                }
+                
+                return result_parsed;
+            },
+            {
+                maxRetries: 2,
+                initialDelayMs: 1000,
+                timeoutMs: 20000, // 20 seconds
+            },
+            "Task Update"
+        );
+        
         return parsed;
-    } catch (e) {
-        console.error("Updater JSON Parse Error", e);
+    } catch (error) {
+        console.error("[Updater] Error:", error);
+        
+        if (error instanceof AIError) {
+            console.error("[Updater] AI Error:", getUserFriendlyErrorMessage(error));
+        }
+        
+        // Return safe fallback
         return {
             taskId: targetTask?.id || null,
             updates: {},
-            missingInfo: "I'm not sure which task you want to update."
+            missingInfo: error instanceof AIError 
+                ? getUserFriendlyErrorMessage(error)
+                : "I'm not sure which task you want to update.",
         };
     }
 }

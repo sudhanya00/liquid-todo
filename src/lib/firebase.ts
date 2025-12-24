@@ -24,11 +24,16 @@ if (!firebaseConfig.apiKey) {
 const app = !getApps().length ? initializeApp(firebaseConfig) : getApp();
 const auth = getAuth(app);
 const db = getFirestore(app);
-const googleProvider = new GoogleAuthProvider();
 
-// Enable offline persistence (only on client)
-// Enable offline persistence (only on client)
-if (isClient) {
+// Configure Google Auth Provider
+const googleProvider = new GoogleAuthProvider();
+googleProvider.setCustomParameters({
+    prompt: 'select_account'
+});
+
+// Enable offline persistence (only on client in development)
+// Disabled in production due to "client offline" issues
+if (isClient && process.env.NODE_ENV === 'development') {
     enableIndexedDbPersistence(db).catch((err) => {
         if (err.code === 'failed-precondition') {
             console.warn('Firestore persistence failed: Multiple tabs open');

@@ -15,6 +15,7 @@ import { NextResponse } from "next/server";
 import { z } from "zod";
 import { transcribeWithGemini, parseVoiceLogActions, VoiceLogAction } from "@/lib/services/speechToText";
 import { checkEntitlement, incrementUsage } from "@/lib/middleware/entitlementMiddleware";
+import { AIError, getUserFriendlyErrorMessage } from "@/lib/aiRetry";
 
 // Request validation schema
 const VoiceLogRequestSchema = z.object({
@@ -115,19 +116,33 @@ export async function POST(request: Request) {
                     { status: 422 }
                 );
             }
+            
+            if (typedError.code === "SERVICE_ERROR") {
+                return NextResponse.json(
+                    VoiceLogResponseSchema.parse({
+                        success: false,
+                        error: typedError.message,
+                    }),
+                    { status: 503 }
+                );
+            }
         }
         
-        // Handle Gemini API errors
-        if (error instanceof Error && error.message.includes("API")) {
+        // Handle AIError
+        if (error instanceof AIError) {
+            const message = getUserFriendlyErrorMessage(error);
+            const statusCode = error.retryable ? 503 : 500;
+            
             return NextResponse.json(
                 VoiceLogResponseSchema.parse({
                     success: false,
-                    error: "Voice transcription service temporarily unavailable. Please try again.",
+                    error: message,
                 }),
-                { status: 503 }
+                { status: statusCode }
             );
         }
         
+        // Generic fallback
         return NextResponse.json(
             VoiceLogResponseSchema.parse({
                 success: false,
